@@ -1021,58 +1021,48 @@ class AuthController extends Controller
                 'password' => 'required|string|min:8|confirmed',
             ]);
 
-            // Generate 6-digit code
-            $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-            $token = \Str::random(60);
-            $expiresAt = now()->addMinutes(15);
-
-            // Store pending registration (user account NOT created yet)
-            $pendingRegistration = PendingRegistration::create([
+            // Create user immediately - NO EMAIL VERIFICATION REQUIRED
+            $user = User::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
                 'role' => 'donor',
-                'verification_code' => $code,
-                'verification_token' => $token,
-                'expires_at' => $expiresAt,
-                'attempts' => 0,
-                'resend_count' => 0,
+                'email_verified_at' => now(), // Mark as verified immediately
+                'verification_status' => 'verified',
             ]);
 
-            // Send verification email with proper error handling
-            try {
-                // Queue the email instead of sending immediately
-                Mail::to($validated['email'])->queue(
-                    new VerifyEmailMail([
-                        'name' => $validated['name'],
-                        'email' => $validated['email'],
-                        'code' => $code,
-                        'token' => $token,
-                        'expires_in' => 15,
-                    ])
-                );
-                
-                Log::info('Verification email queued successfully', [
-                    'email' => $validated['email'],
-                    'code' => $code,
-                ]);
-            } catch (\Exception $mailError) {
-                // Log error but don't fail registration
-                Log::error('Email queueing failed during registration', [
-                    'email' => $validated['email'],
-                    'error' => $mailError->getMessage(),
-                    'trace' => $mailError->getTraceAsString(),
-                ]);
-                
-                // Continue with registration even if email fails
-                Log::warning('Registration completed without email - user will need manual verification');
-            }
+            // Create donor profile
+            $user->donor()->create([
+                'phone' => null,
+                'address' => null,
+                'date_of_birth' => null,
+                'gender' => null,
+                'occupation' => null,
+                'bio' => null,
+                'profile_image' => null,
+                'is_anonymous' => false,
+                'notification_preferences' => json_encode([
+                    'email_notifications' => true,
+                    'sms_notifications' => false,
+                    'push_notifications' => true,
+                ]),
+            ]);
+
+            Log::info('User registered successfully without email verification', [
+                'user_id' => $user->id,
+                'email' => $user->email,
+                'name' => $user->name,
+            ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Verification code sent to your email. Please verify to complete registration.',
-                'email' => $validated['email'],
-                'expires_in' => 15, // minutes
+                'message' => 'Registration successful! You can now login.',
+                'user' => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                ],
             ], 201);
 
         } catch (ValidationException $e) {
