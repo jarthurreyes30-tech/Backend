@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\Charity;
+use App\Models\PendingRegistration;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
@@ -17,6 +18,7 @@ use Illuminate\Support\Facades\Schema;
 use App\Mail\EmailVerifiedMail;
 use App\Mail\PasswordChangedMail;
 use App\Mail\AccountDeactivatedMail;
+use App\Mail\VerifyEmailMail;
 
 class AuthController extends Controller
 {
@@ -1025,7 +1027,7 @@ class AuthController extends Controller
             $expiresAt = now()->addMinutes(15);
 
             // Store pending registration (user account NOT created yet)
-            $pendingRegistration = \App\Models\PendingRegistration::create([
+            $pendingRegistration = PendingRegistration::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
@@ -1039,8 +1041,8 @@ class AuthController extends Controller
 
             // Send verification email
             try {
-                \Mail::to($validated['email'])->send(
-                    new \App\Mail\VerifyEmailMail([
+                Mail::to($validated['email'])->send(
+                    new VerifyEmailMail([
                         'name' => $validated['name'],
                         'email' => $validated['email'],
                         'code' => $code,
@@ -1107,7 +1109,7 @@ class AuthController extends Controller
         ]);
 
         // First check for pending registration (new flow)
-        $pendingReg = \App\Models\PendingRegistration::where('email', $validated['email'])
+        $pendingReg = PendingRegistration::where('email', $validated['email'])
             ->where('verification_code', $validated['code'])
             ->first();
 
@@ -1333,7 +1335,7 @@ class AuthController extends Controller
         ]);
 
         // First check for pending registration (new flow)
-        $pendingReg = \App\Models\PendingRegistration::where('email', $validated['email'])->first();
+        $pendingReg = PendingRegistration::where('email', $validated['email'])->first();
 
         if ($pendingReg) {
             // Check resend limit
@@ -1360,8 +1362,8 @@ class AuthController extends Controller
 
             // Send verification email
             try {
-                \Mail::to($pendingReg->email)->send(
-                    new \App\Mail\VerifyEmailMail([
+                Mail::to($pendingReg->email)->send(
+                    new VerifyEmailMail([
                         'name' => $pendingReg->name,
                         'email' => $pendingReg->email,
                         'code' => $code,
@@ -1451,8 +1453,8 @@ class AuthController extends Controller
         $verification->save();
 
         // Send new verification email immediately
-        \Mail::to($user->email)->send(
-            new \App\Mail\VerifyEmailMail([
+        Mail::to($user->email)->send(
+            new VerifyEmailMail([
                 'name' => $user->name,
                 'email' => $user->email,
                 'code' => $code,
