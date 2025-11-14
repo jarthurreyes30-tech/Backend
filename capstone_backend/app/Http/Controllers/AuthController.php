@@ -1068,7 +1068,7 @@ class AuthController extends Controller
                 'name' => $validated['name'],
             ]);
 
-            // Send verification code email
+            // Send verification code email IMMEDIATELY (not queued)
             try {
                 Mail::to($validated['email'])->send(
                     new \App\Mail\VerificationCodeMail(
@@ -1078,16 +1078,21 @@ class AuthController extends Controller
                         $pending->expires_at
                     )
                 );
-                Log::info('Verification code sent', ['email' => $validated['email']]);
-            } catch (\Exception $e) {
-                Log::error('Failed to send verification email', [
+                Log::info('Verification email sent immediately', [
                     'email' => $validated['email'],
-                    'error' => $e->getMessage()
+                    'code_sent' => true
+                ]);
+            } catch (\Exception $e) {
+                Log::error('CRITICAL: Failed to send verification email', [
+                    'email' => $validated['email'],
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
                 ]);
                 $pending->delete();
                 return response()->json([
                     'success' => false,
-                    'message' => 'Failed to send verification email. Please try again.'
+                    'message' => 'Failed to send verification email. Please try again.',
+                    'error' => $e->getMessage()
                 ], 500);
             }
 
@@ -1263,11 +1268,18 @@ class AuthController extends Controller
                         $pending->expires_at
                     )
                 );
+                Log::info('Resend verification email sent', [
+                    'email' => $validated['email']
+                ]);
             } catch (\Exception $e) {
-                Log::error('Resend failed', ['error' => $e->getMessage()]);
+                Log::error('CRITICAL: Resend email failed', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Failed to send email.'
+                    'message' => 'Failed to send email.',
+                    'error' => $e->getMessage()
                 ], 500);
             }
 
