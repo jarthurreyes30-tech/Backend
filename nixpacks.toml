@@ -6,8 +6,5 @@ cmds = [
   "cd capstone_backend && composer install --no-dev --optimize-autoloader"
 ]
 
-[phases.build]
-cmds = ["cd capstone_backend && npm install", "cd capstone_backend && npm run build"]
-
 [start]
 cmd = "cd capstone_backend && php artisan serve --host=0.0.0.0 --port=$PORT"
