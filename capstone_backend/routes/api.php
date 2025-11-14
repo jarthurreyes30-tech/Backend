@@ -16,6 +16,86 @@ Route::get('/ping', fn () => ['ok' => true, 'time' => now()->toDateTimeString()]
 Route::get('/email/test-connection', [EmailController::class, 'testConnection']);
 Route::post('/email/test-send', [EmailController::class, 'testSend']);
 
+// Test image upload endpoint
+Route::post('/test-image-upload', function (Request $request) {
+    try {
+        $request->validate([
+            'image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048'
+        ]);
+        
+        $path = $request->file('image')->store('test_images', 'public');
+        $url = config('app.url') . '/storage/' . $path;
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Image uploaded successfully',
+            'path' => $path,
+            'url' => $url,
+            'full_path' => storage_path('app/public/' . $path),
+            'file_exists' => file_exists(storage_path('app/public/' . $path))
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage()
+        ], 500);
+    }
+});
+
+// Get sample data with images for testing
+Route::get('/test-data-with-images', function () {
+    try {
+        // Get some users with profile images
+        $users = \App\Models\User::whereNotNull('profile_image')
+            ->select('id', 'name', 'email', 'profile_image', 'role')
+            ->limit(5)
+            ->get()
+            ->map(function ($user) {
+                return [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->role,
+                    'profile_image' => $user->profile_image,
+                    'profile_image_url' => $user->profile_image ? config('app.url') . '/storage/' . $user->profile_image : null,
+                    'image_exists' => $user->profile_image ? \Storage::disk('public')->exists($user->profile_image) : false
+                ];
+            });
+
+        // Get some charities with logos
+        $charities = \App\Models\Charity::whereNotNull('logo_path')
+            ->select('id', 'name', 'logo_path', 'cover_image')
+            ->limit(5)
+            ->get()
+            ->map(function ($charity) {
+                return [
+                    'id' => $charity->id,
+                    'name' => $charity->name,
+                    'logo_path' => $charity->logo_path,
+                    'logo_url' => $charity->logo_path ? config('app.url') . '/storage/' . $charity->logo_path : null,
+                    'logo_exists' => $charity->logo_path ? \Storage::disk('public')->exists($charity->logo_path) : false,
+                    'cover_image' => $charity->cover_image,
+                    'cover_url' => $charity->cover_image ? config('app.url') . '/storage/' . $charity->cover_image : null,
+                    'cover_exists' => $charity->cover_image ? \Storage::disk('public')->exists($charity->cover_image) : false
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'users_with_images' => $users,
+            'charities_with_images' => $charities,
+            'app_url' => config('app.url'),
+            'storage_base_url' => config('app.url') . '/storage/'
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
+});
+
 // TEMPORARY: Queue status and management
 Route::get('/queue/status', function () {
     try {
