@@ -24,7 +24,7 @@ Route::post('/test-image-upload', function (Request $request) {
         ]);
         
         $path = $request->file('image')->store('test_images', 'public');
-        $url = config('app.url') . '/storage/' . $path;
+        $url = 'https://backend-production-3c74.up.railway.app/storage/' . $path;
         
         return response()->json([
             'success' => true,
@@ -57,7 +57,7 @@ Route::get('/test-data-with-images', function () {
                     'email' => $user->email,
                     'role' => $user->role,
                     'profile_image' => $user->profile_image,
-                    'profile_image_url' => $user->profile_image ? config('app.url') . '/storage/' . $user->profile_image : null,
+                    'profile_image_url' => $user->profile_image ? 'https://backend-production-3c74.up.railway.app/storage/' . $user->profile_image : null,
                     'image_exists' => $user->profile_image ? \Storage::disk('public')->exists($user->profile_image) : false
                 ];
             });
@@ -72,10 +72,10 @@ Route::get('/test-data-with-images', function () {
                     'id' => $charity->id,
                     'name' => $charity->name,
                     'logo_path' => $charity->logo_path,
-                    'logo_url' => $charity->logo_path ? config('app.url') . '/storage/' . $charity->logo_path : null,
+                    'logo_url' => $charity->logo_path ? 'https://backend-production-3c74.up.railway.app/storage/' . $charity->logo_path : null,
                     'logo_exists' => $charity->logo_path ? \Storage::disk('public')->exists($charity->logo_path) : false,
                     'cover_image' => $charity->cover_image,
-                    'cover_url' => $charity->cover_image ? config('app.url') . '/storage/' . $charity->cover_image : null,
+                    'cover_url' => $charity->cover_image ? 'https://backend-production-3c74.up.railway.app/storage/' . $charity->cover_image : null,
                     'cover_exists' => $charity->cover_image ? \Storage::disk('public')->exists($charity->cover_image) : false
                 ];
             });
@@ -84,8 +84,8 @@ Route::get('/test-data-with-images', function () {
             'success' => true,
             'users_with_images' => $users,
             'charities_with_images' => $charities,
-            'app_url' => config('app.url'),
-            'storage_base_url' => config('app.url') . '/storage/'
+            'app_url' => 'https://backend-production-3c74.up.railway.app',
+            'storage_base_url' => 'https://backend-production-3c74.up.railway.app/storage/'
         ]);
     } catch (\Exception $e) {
         return response()->json([

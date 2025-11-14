@@ -41,7 +41,7 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => env('APP_URL').'/storage',
+            'url' => 'https://backend-production-3c74.up.railway.app/storage',
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

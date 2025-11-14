@@ -29,6 +29,30 @@ class Charity extends Model
         'campaigns_count' => 'integer',
     ];
 
+    protected $appends = ['logo_url', 'cover_image_url'];
+
+    /**
+     * Get the full HTTPS URL for the charity logo
+     */
+    public function getLogoUrlAttribute()
+    {
+        if (!$this->logo_path) {
+            return null;
+        }
+        return 'https://backend-production-3c74.up.railway.app/storage/' . $this->logo_path;
+    }
+
+    /**
+     * Get the full HTTPS URL for the charity cover image
+     */
+    public function getCoverImageUrlAttribute()
+    {
+        if (!$this->cover_image) {
+            return null;
+        }
+        return 'https://backend-production-3c74.up.railway.app/storage/' . $this->cover_image;
+    }
+
     /**
      * Recalculate and update donation totals from database
      * Excludes refunded donations from totals
