@@ -25,6 +25,10 @@ Route::prefix('brevo-test')->group(function () {
 Route::get('/email/test-connection', [EmailController::class, 'testConnection']);
 Route::post('/email/test-send', [EmailController::class, 'testSend']);
 
+// Direct Email Testing (No Queue)
+Route::post('/test-email', [\App\Http\Controllers\EmailTestController::class, 'testDirectEmail']);
+Route::get('/test-email/config', [\App\Http\Controllers\EmailTestController::class, 'checkBrevoConfig']);
+
 // Test image upload endpoint
 Route::post('/test-image-upload', function (Request $request) {
     try {
