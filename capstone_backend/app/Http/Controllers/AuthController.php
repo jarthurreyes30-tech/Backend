@@ -304,6 +304,20 @@ class AuthController extends Controller
             $this->securityService->logFailedLogin($data['email'], $r->ip(), 'invalid_credentials');
             return response()->json(['message'=>'Invalid credentials'], 401);
         }
+
+        // CRITICAL: Block login if email not verified
+        if (!$user->email_verified_at) {
+            Log::warning('Login blocked - email not verified', [
+                'email' => $user->email,
+                'user_id' => $user->id
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Please verify your email address before logging in. Check your inbox for the verification code.',
+                'email_not_verified' => true,
+                'email' => $user->email
+            ], 403);
+        }
         
         // Check if account is locked
         $lockStatus = $this->securityService->isAccountLocked($user);
@@ -1028,73 +1042,62 @@ class AuthController extends Controller
         try {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
-                // Only enforce uniqueness against users now that pending_registrations is not used
-                'email' => 'required|email|unique:users,email',
+                'email' => 'required|email|unique:users,email|unique:pending_registrations,email',
                 'password' => 'required|string|min:8|confirmed',
             ]);
 
-            // Create user immediately - NO EMAIL VERIFICATION REQUIRED
-            $user = User::create([
+            // Generate 6-digit verification code
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $token = bin2hex(random_bytes(32));
+            
+            // Create pending registration - account NOT created yet
+            $pending = PendingRegistration::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
                 'role' => 'donor',
-                'email_verified_at' => now(), // Mark as verified immediately
-                'verification_status' => 'verified',
+                'verification_code' => $code,
+                'verification_token' => $token,
+                'expires_at' => now()->addMinutes(15),
+                'attempts' => 0,
+                'resend_count' => 0,
             ]);
 
-            // Create donor profile using correct relation name and fields
-            $nameParts = explode(' ', $validated['name'], 3);
-            $user->donorProfile()->create([
-                'first_name' => $nameParts[0] ?? 'User',
-                'middle_name' => isset($nameParts[2]) ? $nameParts[1] : null,
-                'last_name' => $nameParts[count($nameParts) - 1] ?? 'Name',
-                'gender' => null,
-                'date_of_birth' => null,
-                'street_address' => null,
-                'barangay' => null,
-                'city' => null,
-                'province' => null,
-                'region' => null,
-                'postal_code' => null,
-                'country' => 'Philippines',
-                'full_address' => null,
-                'cause_preferences' => null,
-                'pref_email' => true,
-                'pref_sms' => false,
-                'pref_updates' => true,
-                'pref_urgent' => true,
-                'pref_reports' => false,
+            Log::info('Pending registration created - awaiting email verification', [
+                'email' => $validated['email'],
+                'name' => $validated['name'],
             ]);
 
-            Log::info('User registered successfully without email verification', [
-                'user_id' => $user->id,
-                'email' => $user->email,
-                'name' => $user->name,
-            ]);
-
-            // Send welcome email
+            // Send verification code email
             try {
-                Mail::to($user->email)->send(new \App\Mail\WelcomeEmail($user));
-                Log::info('Welcome email sent', ['user_id' => $user->id, 'email' => $user->email]);
+                Mail::to($validated['email'])->send(
+                    new \App\Mail\VerificationCodeMail(
+                        $validated['name'],
+                        $validated['email'],
+                        $code,
+                        $pending->expires_at
+                    )
+                );
+                Log::info('Verification code sent', ['email' => $validated['email']]);
             } catch (\Exception $e) {
-                Log::error('Failed to send welcome email', [
-                    'user_id' => $user->id,
+                Log::error('Failed to send verification email', [
+                    'email' => $validated['email'],
                     'error' => $e->getMessage()
                 ]);
-                // Don't fail registration if email fails
+                $pending->delete();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send verification email. Please try again.'
+                ], 500);
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Registration successful! You can now login.',
-                'user' => [
-                    'id' => $user->id,
-                    'name' => $user->name,
-                    'email' => $user->email,
-                    'role' => $user->role,
-                ],
-            ], 201);
+                'message' => 'Verification code sent to your email! Please verify to complete registration.',
+                'email' => $validated['email'],
+                'expires_at' => $pending->expires_at->toIso8601String(),
+                'requires_verification' => true,
+            ], 200);
 
         } catch (ValidationException $e) {
             return response()->json([
@@ -1111,6 +1114,174 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Server error during registration: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Verify email with 6-digit code - creates actual user account
+     */
+    public function verifyRegistration(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'email' => 'required|email',
+                'code' => 'required|string|size:6',
+            ]);
+
+            $pending = PendingRegistration::where('email', $validated['email'])->first();
+
+            if (!$pending) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No pending registration found.'
+                ], 404);
+            }
+
+            if ($pending->isExpired()) {
+                $pending->delete();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Verification code expired. Please register again.'
+                ], 410);
+            }
+
+            if ($pending->hasMaxAttempts()) {
+                $pending->delete();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Too many failed attempts. Please register again.'
+                ], 429);
+            }
+
+            if ($pending->verification_code !== $validated['code']) {
+                $pending->incrementAttempts();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid code.',
+                    'remaining_attempts' => 5 - $pending->attempts
+                ], 422);
+            }
+
+            // Code correct! Create actual user account
+            DB::beginTransaction();
+            try {
+                $user = User::create([
+                    'name' => $pending->name,
+                    'email' => $pending->email,
+                    'password' => $pending->password,
+                    'role' => $pending->role,
+                    'email_verified_at' => now(),
+                    'verification_status' => 'verified',
+                ]);
+
+                $nameParts = explode(' ', $pending->name, 3);
+                $user->donorProfile()->create([
+                    'first_name' => $nameParts[0] ?? 'User',
+                    'middle_name' => isset($nameParts[2]) ? $nameParts[1] : null,
+                    'last_name' => $nameParts[count($nameParts) - 1] ?? 'Name',
+                    'country' => 'Philippines',
+                    'pref_email' => true,
+                    'pref_updates' => true,
+                    'pref_urgent' => true,
+                ]);
+
+                $pending->delete();
+                DB::commit();
+
+                Log::info('Email verified - account created', ['user_id' => $user->id]);
+
+                try {
+                    Mail::to($user->email)->send(new \App\Mail\WelcomeEmail($user));
+                } catch (\Exception $e) {
+                    Log::error('Welcome email failed', ['error' => $e->getMessage()]);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Email verified! Account created successfully.',
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role,
+                    ],
+                ], 201);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+        } catch (\Throwable $e) {
+            Log::error('Verification failed', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Server error: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Resend verification code
+     */
+    public function resendRegistrationCode(Request $request)
+    {
+        try {
+            $validated = $request->validate(['email' => 'required|email']);
+
+            $pending = PendingRegistration::where('email', $validated['email'])->first();
+
+            if (!$pending) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No pending registration found.'
+                ], 404);
+            }
+
+            if ($pending->hasMaxResends()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Maximum resend limit reached. Please register again.'
+                ], 429);
+            }
+
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            
+            $pending->update([
+                'verification_code' => $code,
+                'expires_at' => now()->addMinutes(15),
+                'attempts' => 0,
+            ]);
+            
+            $pending->incrementResendCount();
+
+            try {
+                Mail::to($validated['email'])->send(
+                    new \App\Mail\VerificationCodeMail(
+                        $pending->name,
+                        $pending->email,
+                        $code,
+                        $pending->expires_at
+                    )
+                );
+            } catch (\Exception $e) {
+                Log::error('Resend failed', ['error' => $e->getMessage()]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send email.'
+                ], 500);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'New verification code sent!',
+                'expires_at' => $pending->expires_at->toIso8601String(),
+                'remaining_resends' => 3 - $pending->resend_count
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Resend failed', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Server error.'
             ], 500);
         }
     }

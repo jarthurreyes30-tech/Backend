@@ -193,12 +193,14 @@ Route::get('/locations/regions', [LocationController::class,'getRegions']);
 Route::get('/locations/regions/{regionCode}/provinces', [LocationController::class,'getProvinces']);
 Route::get('/locations/regions/{regionCode}/provinces/{provinceCode}/cities', [LocationController::class,'getCities']);
 
-// Auth routes (public)
+// Authentication routes
 Route::post('/auth/register', [AuthController::class, 'registerDonor']);
-Route::post('/auth/register-charity', [AuthController::class,'registerCharityAdmin']);
-Route::post('/auth/register-minimal', [AuthController::class,'registerMinimal']); // New minimal registration
-Route::post('/auth/login', [AuthController::class,'login']);
-Route::post('/auth/logout', [AuthController::class,'logout'])->middleware('auth:sanctum');
+Route::post('/auth/register-charity', [AuthController::class, 'registerCharityAdmin']);
+Route::post('/auth/register-minimal', [AuthController::class, 'registerMinimal']);
+Route::post('/auth/verify-registration', [AuthController::class, 'verifyRegistration']);
+Route::post('/auth/resend-registration-code', [AuthController::class, 'resendRegistrationCode']);
+Route::post('/auth/login', [AuthController::class, 'login']);
+Route::post('/auth/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 
 // Forgot Password routes
 Route::post('/auth/forgot-password', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'sendResetCode']);
