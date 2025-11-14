@@ -74,6 +74,17 @@ class AuthController extends Controller
             // Notify admins about new user registration
             \App\Services\NotificationHelper::newUserRegistration($user);
             
+            // Send welcome email
+            try {
+                Mail::to($user->email)->send(new \App\Mail\WelcomeEmail($user));
+                Log::info('Welcome email sent to donor', ['user_id' => $user->id]);
+            } catch (\Exception $e) {
+                Log::error('Failed to send donor welcome email', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage()
+                ]);
+            }
+            
             return response()->json([
                 'message' => 'Registration successful',
                 'user' => $user
@@ -1061,6 +1072,18 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'name' => $user->name,
             ]);
+
+            // Send welcome email
+            try {
+                Mail::to($user->email)->send(new \App\Mail\WelcomeEmail($user));
+                Log::info('Welcome email sent', ['user_id' => $user->id, 'email' => $user->email]);
+            } catch (\Exception $e) {
+                Log::error('Failed to send welcome email', [
+                    'user_id' => $user->id,
+                    'error' => $e->getMessage()
+                ]);
+                // Don't fail registration if email fails
+            }
 
             return response()->json([
                 'success' => true,
