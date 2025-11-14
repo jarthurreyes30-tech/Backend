@@ -1017,7 +1017,8 @@ class AuthController extends Controller
         try {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email|unique:pending_registrations,email',
+                // Only enforce uniqueness against users now that pending_registrations is not used
+                'email' => 'required|email|unique:users,email',
                 'password' => 'required|string|min:8|confirmed',
             ]);
 
@@ -1031,21 +1032,28 @@ class AuthController extends Controller
                 'verification_status' => 'verified',
             ]);
 
-            // Create donor profile
-            $user->donor()->create([
-                'phone' => null,
-                'address' => null,
-                'date_of_birth' => null,
+            // Create donor profile using correct relation name and fields
+            $nameParts = explode(' ', $validated['name'], 3);
+            $user->donorProfile()->create([
+                'first_name' => $nameParts[0] ?? 'User',
+                'middle_name' => isset($nameParts[2]) ? $nameParts[1] : null,
+                'last_name' => $nameParts[count($nameParts) - 1] ?? 'Name',
                 'gender' => null,
-                'occupation' => null,
-                'bio' => null,
-                'profile_image' => null,
-                'is_anonymous' => false,
-                'notification_preferences' => json_encode([
-                    'email_notifications' => true,
-                    'sms_notifications' => false,
-                    'push_notifications' => true,
-                ]),
+                'date_of_birth' => null,
+                'street_address' => null,
+                'barangay' => null,
+                'city' => null,
+                'province' => null,
+                'region' => null,
+                'postal_code' => null,
+                'country' => 'Philippines',
+                'full_address' => null,
+                'cause_preferences' => null,
+                'pref_email' => true,
+                'pref_sms' => false,
+                'pref_updates' => true,
+                'pref_urgent' => true,
+                'pref_reports' => false,
             ]);
 
             Log::info('User registered successfully without email verification', [
