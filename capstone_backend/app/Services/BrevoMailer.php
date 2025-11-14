@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
-use SendinBlue\Client\Configuration;
-use SendinBlue\Client\Api\TransactionalEmailsApi;
-use SendinBlue\Client\Model\SendSmtpEmail;
+use Brevo\Client\Configuration;
+use Brevo\Client\Api\TransactionalEmailsApi;
+use Brevo\Client\Model\SendSmtpEmail;
 use GuzzleHttp\Client;
 use Illuminate\Support\Facades\Log;
 use Exception;
