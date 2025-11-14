@@ -1039,11 +1039,34 @@ class AuthController extends Controller
                 'resend_count' => 0,
             ]);
 
-            // TEMPORARILY SKIP EMAIL SENDING - JUST RETURN SUCCESS
-            Log::info('Registration successful - EMAIL SENDING DISABLED FOR TESTING', [
-                'email' => $validated['email'],
-                'code' => $code,
-            ]);
+            // Send verification email with proper error handling
+            try {
+                // Queue the email instead of sending immediately
+                Mail::to($validated['email'])->queue(
+                    new VerifyEmailMail([
+                        'name' => $validated['name'],
+                        'email' => $validated['email'],
+                        'code' => $code,
+                        'token' => $token,
+                        'expires_in' => 15,
+                    ])
+                );
+                
+                Log::info('Verification email queued successfully', [
+                    'email' => $validated['email'],
+                    'code' => $code,
+                ]);
+            } catch (\Exception $mailError) {
+                // Log error but don't fail registration
+                Log::error('Email queueing failed during registration', [
+                    'email' => $validated['email'],
+                    'error' => $mailError->getMessage(),
+                    'trace' => $mailError->getTraceAsString(),
+                ]);
+                
+                // Continue with registration even if email fails
+                Log::warning('Registration completed without email - user will need manual verification');
+            }
 
             return response()->json([
                 'success' => true,
@@ -1334,9 +1357,9 @@ class AuthController extends Controller
             $pendingReg->incrementResendCount();
             $pendingReg->save();
 
-            // Send verification email
+            // Send verification email using queue
             try {
-                Mail::to($pendingReg->email)->send(
+                Mail::to($pendingReg->email)->queue(
                     new VerifyEmailMail([
                         'name' => $pendingReg->name,
                         'email' => $pendingReg->email,
@@ -1345,19 +1368,18 @@ class AuthController extends Controller
                         'expires_in' => 15,
                     ])
                 );
-                Log::info('Verification code resent successfully', [
+                Log::info('Verification code resent and queued successfully', [
                     'email' => $pendingReg->email,
                     'resend_count' => $pendingReg->resend_count,
                 ]);
-            } catch (\Exception $e) {
-                Log::error('Failed to resend verification email', [
+            } catch (\Exception $mailError) {
+                Log::error('Failed to queue resend verification email', [
                     'email' => $pendingReg->email,
-                    'error' => $e->getMessage(),
+                    'error' => $mailError->getMessage(),
                 ]);
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Failed to send verification email. Please try again.'
-                ], 500);
+                
+                // Don't fail the request, just log the error
+                Log::warning('Resend completed without email - user will need to try again');
             }
 
             return response()->json([
@@ -1426,16 +1448,26 @@ class AuthController extends Controller
         $verification->attempts = 0; // Reset attempts
         $verification->save();
 
-        // Send new verification email immediately
-        Mail::to($user->email)->send(
-            new VerifyEmailMail([
-                'name' => $user->name,
+        // Send new verification email using queue
+        try {
+            Mail::to($user->email)->queue(
+                new VerifyEmailMail([
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'code' => $code,
+                    'token' => $token,
+                    'expires_in' => 15,
+                ])
+            );
+            Log::info('Verification email queued for existing user', [
                 'email' => $user->email,
-                'code' => $code,
-                'token' => $token,
-                'expires_in' => 15,
-            ])
-        );
+            ]);
+        } catch (\Exception $mailError) {
+            Log::error('Failed to queue verification email for existing user', [
+                'email' => $user->email,
+                'error' => $mailError->getMessage(),
+            ]);
+        }
 
         return response()->json([
             'success' => true,
