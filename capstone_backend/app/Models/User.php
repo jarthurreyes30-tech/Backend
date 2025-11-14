@@ -15,6 +15,7 @@ class User extends Authenticatable
         'name',
         'display_name',
         'email',
+        'email_verified_at',
         'phone',
         'address',
         'location',
@@ -26,6 +27,7 @@ class User extends Authenticatable
         // Account Info
         'role',
         'status',
+        'verification_status',
         
         // Suspension Info
         'suspended_until',
