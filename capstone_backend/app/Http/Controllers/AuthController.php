@@ -32,63 +32,85 @@ class AuthController extends Controller
         try {
             $data = $r->validate([
                 'name'=>'required|string|max:255',
-                'email'=>'required|email|unique:users,email',
-                'password'=>'required|min:6|confirmed',
-                'phone'=>'nullable|string',
-                'address'=>'nullable|string',
-                'profile_image'=>'nullable|image|max:2048',
-                // Required location fields
-                'region'=>'required|string|max:255',
-                'province'=>'required|string|max:255',
-                'city'=>'required|string|max:255',
-                'barangay'=>'required|string|max:255'
+                'email'=>'required|email|unique:users,email|unique:pending_registrations,email',
+                'password'=>'required|string|min:8|confirmed',
             ]);
             
-            // Handle profile image upload
-            $profileImagePath = null;
-            if ($r->hasFile('profile_image')) {
-                $profileImagePath = $r->file('profile_image')->store('profile_images', 'public');
-            }
+            // Generate 6-digit verification code
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $token = bin2hex(random_bytes(32));
             
-            $user = User::create([
-                'name'=>$data['name'],
-                'email'=>$data['email'],
-                'password'=>Hash::make($data['password']),
-                'phone'=>$data['phone'] ?? null,
-                'address'=>$data['address'] ?? null,
-                'profile_image'=>$profileImagePath,
-                'region'=>$data['region'],
-                'province'=>$data['province'],
-                'city'=>$data['city'],
-                'barangay'=>$data['barangay'],
-                'role'=>'donor',
-                'status'=>'active'
-            ]);
+            // Store registration data including profile fields
+            $registrationData = [
+                'gender' => $r->input('gender'),
+                'date_of_birth' => $r->input('date_of_birth'),
+                'street_address' => $r->input('street_address'),
+                'barangay' => $r->input('barangay'),
+                'city' => $r->input('city'),
+                'province' => $r->input('province'),
+                'region' => $r->input('region'),
+                'postal_code' => $r->input('postal_code'),
+                'country' => $r->input('country', 'Philippines'),
+                'full_address' => $r->input('full_address'),
+                'cause_preferences' => $r->input('cause_preferences'),
+                'pref_email' => $r->boolean('pref_email', true),
+                'pref_sms' => $r->boolean('pref_sms', false),
+                'pref_updates' => $r->boolean('pref_updates', true),
+                'pref_urgent' => $r->boolean('pref_urgent', true),
+                'pref_reports' => $r->boolean('pref_reports', false),
+            ];
             
-            // Log successful registration
-            $this->securityService->logAuthEvent('register', $user, [
+            // Create pending registration - NO USER CREATED YET
+            $pending = PendingRegistration::create([
+                'name' => $data['name'],
+                'email' => $data['email'],
+                'password' => Hash::make($data['password']),
                 'role' => 'donor',
-                'registration_method' => 'email'
+                'verification_code' => $code,
+                'verification_token' => $token,
+                'expires_at' => now()->addMinutes(15),
+                'attempts' => 0,
+                'resend_count' => 0,
+                'registration_data' => $registrationData,
             ]);
-            
-            // Notify admins about new user registration
-            \App\Services\NotificationHelper::newUserRegistration($user);
-            
-            // Send welcome email
+
+            Log::info('Donor registration pending - awaiting verification', [
+                'email' => $data['email'],
+                'name' => $data['name'],
+            ]);
+
+            // Send verification code email IMMEDIATELY
             try {
-                Mail::to($user->email)->send(new \App\Mail\WelcomeEmail($user));
-                Log::info('Welcome email sent to donor', ['user_id' => $user->id]);
+                Mail::to($data['email'])->send(
+                    new \App\Mail\VerificationCodeMail(
+                        $data['name'],
+                        $data['email'],
+                        $code,
+                        $pending->expires_at
+                    )
+                );
+                Log::info('Donor verification email sent', ['email' => $data['email']]);
             } catch (\Exception $e) {
-                Log::error('Failed to send donor welcome email', [
-                    'user_id' => $user->id,
-                    'error' => $e->getMessage()
+                Log::error('CRITICAL: Failed to send donor verification email', [
+                    'email' => $data['email'],
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
                 ]);
+                $pending->delete();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send verification email.',
+                    'error' => $e->getMessage()
+                ], 500);
             }
-            
+
             return response()->json([
-                'message' => 'Registration successful',
-                'user' => $user
-            ], 201);
+                'success' => true,
+                'message' => 'Verification code sent! Check your email to complete registration.',
+                'email' => $data['email'],
+                'expires_at' => $pending->expires_at->toIso8601String(),
+                'requires_verification' => true,
+            ], 200);
         } catch (ValidationException $e) {
             return response()->json([
                 'message' => 'Validation failed',
@@ -97,9 +119,12 @@ class AuthController extends Controller
         } catch (\Throwable $e) {
             Log::error('Register donor failed', [
                 'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+                'trace' => $e->getTraceAsString()
             ]);
-            return response()->json(['message' => 'Server error creating account'], 500);
+            return response()->json([
+                'message' => 'Server error creating account',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 
@@ -1168,43 +1193,65 @@ class AuthController extends Controller
                 ], 422);
             }
 
-            // Code correct! Create actual user account
+            // Code correct! Create actual user account NOW
             DB::beginTransaction();
             try {
                 $user = User::create([
                     'name' => $pending->name,
                     'email' => $pending->email,
-                    'password' => $pending->password,
+                    'password' => $pending->password, // Already hashed
                     'role' => $pending->role,
                     'email_verified_at' => now(),
                     'verification_status' => 'verified',
+                    'status' => 'active',
                 ]);
 
+                // Create donor profile with stored registration data
+                $regData = $pending->registration_data ?? [];
                 $nameParts = explode(' ', $pending->name, 3);
+                
                 $user->donorProfile()->create([
                     'first_name' => $nameParts[0] ?? 'User',
                     'middle_name' => isset($nameParts[2]) ? $nameParts[1] : null,
                     'last_name' => $nameParts[count($nameParts) - 1] ?? 'Name',
-                    'country' => 'Philippines',
-                    'pref_email' => true,
-                    'pref_updates' => true,
-                    'pref_urgent' => true,
+                    'gender' => $regData['gender'] ?? null,
+                    'date_of_birth' => $regData['date_of_birth'] ?? null,
+                    'street_address' => $regData['street_address'] ?? null,
+                    'barangay' => $regData['barangay'] ?? null,
+                    'city' => $regData['city'] ?? null,
+                    'province' => $regData['province'] ?? null,
+                    'region' => $regData['region'] ?? null,
+                    'postal_code' => $regData['postal_code'] ?? null,
+                    'country' => $regData['country'] ?? 'Philippines',
+                    'full_address' => $regData['full_address'] ?? null,
+                    'cause_preferences' => $regData['cause_preferences'] ?? null,
+                    'pref_email' => $regData['pref_email'] ?? true,
+                    'pref_sms' => $regData['pref_sms'] ?? false,
+                    'pref_updates' => $regData['pref_updates'] ?? true,
+                    'pref_urgent' => $regData['pref_urgent'] ?? true,
+                    'pref_reports' => $regData['pref_reports'] ?? false,
                 ]);
 
+                // Delete pending record
                 $pending->delete();
                 DB::commit();
 
-                Log::info('Email verified - account created', ['user_id' => $user->id]);
+                Log::info('✅ Email verified - user account CREATED', [
+                    'user_id' => $user->id,
+                    'email' => $user->email
+                ]);
 
+                // Send welcome email
                 try {
                     Mail::to($user->email)->send(new \App\Mail\WelcomeEmail($user));
+                    Log::info('Welcome email sent', ['user_id' => $user->id]);
                 } catch (\Exception $e) {
                     Log::error('Welcome email failed', ['error' => $e->getMessage()]);
                 }
 
                 return response()->json([
                     'success' => true,
-                    'message' => 'Email verified! Account created successfully.',
+                    'message' => 'Email verified! Your account has been created successfully.',
                     'user' => [
                         'id' => $user->id,
                         'name' => $user->name,
@@ -1214,6 +1261,10 @@ class AuthController extends Controller
                 ], 201);
             } catch (\Exception $e) {
                 DB::rollBack();
+                Log::error('Failed to create user after verification', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
                 throw $e;
             }
         } catch (\Throwable $e) {
