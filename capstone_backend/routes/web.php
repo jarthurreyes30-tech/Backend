@@ -128,46 +128,67 @@ Route::get('/clear-all-caches', function () {
     }
 });
 
-// TEMPORARY: Test registration endpoint
-Route::post('/test-registration', function (\Illuminate\Http\Request $request) {
+// TEMPORARY: Force process queue jobs
+Route::get('/force-process-queue', function () {
     try {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|email|unique:users,email|unique:pending_registrations,email',
-            'password' => 'required|string|min:8|confirmed',
-        ]);
-
-        // Generate 6-digit code
-        $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-        $token = \Str::random(60);
-        $expiresAt = now()->addMinutes(15);
-
-        // Store pending registration
-        $pendingRegistration = \App\Models\PendingRegistration::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => \Hash::make($validated['password']),
-            'role' => 'donor',
-            'verification_code' => $code,
-            'verification_token' => $token,
-            'expires_at' => $expiresAt,
-            'attempts' => 0,
-            'resend_count' => 0,
-        ]);
-
+        // Get pending jobs
+        $pendingJobs = \DB::table('jobs')->count();
+        
+        // Process jobs one by one
+        $processed = 0;
+        while (\DB::table('jobs')->exists() && $processed < 10) {
+            \Artisan::call('queue:work', [
+                '--once' => true,
+                '--timeout' => 30,
+                '--tries' => 1
+            ]);
+            $processed++;
+        }
+        
+        $remainingJobs = \DB::table('jobs')->count();
+        $failedJobs = \DB::table('failed_jobs')->count();
+        
         return response()->json([
             'success' => true,
-            'message' => 'Test registration successful - NO EMAIL SENT',
-            'email' => $validated['email'],
-            'code' => $code,
-            'pending_id' => $pendingRegistration->id,
+            'message' => 'Queue processing completed',
+            'jobs_before' => $pendingJobs,
+            'jobs_processed' => $processed,
+            'jobs_remaining' => $remainingJobs,
+            'failed_jobs' => $failedJobs,
         ]);
     } catch (\Exception $e) {
         return response()->json([
             'success' => false,
             'error' => $e->getMessage(),
-            'line' => $e->getLine(),
-            'file' => $e->getFile(),
+            'trace' => $e->getTraceAsString(),
+        ], 500);
+    }
+});
+
+// TEMPORARY: Send test email immediately (bypass queue)
+Route::get('/send-test-email-now', function () {
+    try {
+        $email = new \App\Mail\VerifyEmailMail([
+            'name' => 'Test User',
+            'email' => 'regondolajohnarthur51@gmail.com',
+            'code' => '123456',
+            'token' => 'test-token',
+            'expires_in' => 15,
+        ]);
+        
+        // Send immediately, not queued
+        \Mail::to('regondolajohnarthur51@gmail.com')->send($email);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Test email sent immediately (not queued)',
+            'to' => 'regondolajohnarthur51@gmail.com',
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString(),
         ], 500);
     }
 });
