@@ -16,9 +16,9 @@ export APP_URL="${APP_URL:-http://0.0.0.0:${PORT}}"
 cd capstone_backend
 
 # Optimize Laravel for production (safe if already done)
-php artisan config:cache || true
-php artisan route:cache || true
-php artisan view:cache || true
+php82 artisan config:cache || true
+php82 artisan route:cache || true
+php82 artisan view:cache || true
 
 # Run HTTP server
-php artisan serve --host=0.0.0.0 --port="${PORT}"
+php82 artisan serve --host=0.0.0.0 --port="${PORT}"

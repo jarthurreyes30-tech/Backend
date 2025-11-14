@@ -4,15 +4,15 @@ nixPkgs = ["php82", "php82Packages.composer", "nodejs_20"]
 [phases.install]
 cmds = [
   "composer install --no-dev --optimize-autoloader",
-  "php artisan migrate --force",
-  "php artisan db:seed --force || true",
-  "php artisan config:cache",
-  "php artisan route:cache",
-  "php artisan view:cache"
+  "php82 artisan migrate --force",
+  "php82 artisan db:seed --force || true",
+  "php82 artisan config:cache",
+  "php82 artisan route:cache",
+  "php82 artisan view:cache"
 ]
 
 [phases.build]
 cmds = ["npm install", "npm run build"]
 
 [start]
-cmd = "php artisan serve --host=0.0.0.0 --port=$PORT"
+cmd = "php82 artisan serve --host=0.0.0.0 --port=$PORT"
