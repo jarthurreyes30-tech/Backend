@@ -17,7 +17,8 @@ class UsersSeeder extends Seeder
                 'name' => 'System Admin',
                 'password' => Hash::make('password'),
                 'role' => 'admin',
-                'status' => 'active'
+                'status' => 'active',
+                'email_verified_at' => now()
             ]
         );
 
