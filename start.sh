@@ -15,6 +15,10 @@ export APP_URL="${APP_URL:-http://0.0.0.0:${PORT}}"
 # Move into the Laravel backend
 cd capstone_backend
 
+# Run migrations and seed admin user (at runtime when DB is accessible)
+php artisan migrate --force
+php artisan db:seed --class=AdminSeeder --force || true
+
 # Optimize Laravel for production (safe if already done)
 php artisan config:cache || true
 php artisan route:cache || true
