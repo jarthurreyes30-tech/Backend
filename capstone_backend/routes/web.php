@@ -9,38 +9,57 @@ Route::get('/', function () {
     return view('welcome');
 });
 
-// TEMPORARY: Migration endpoint - REMOVE AFTER USE!
-Route::get('/run-migrations-now', function () {
+// TEMPORARY: Simple health check
+Route::get('/health-check', function () {
+    return response()->json([
+        'status' => 'ok',
+        'timestamp' => now(),
+        'php_version' => PHP_VERSION,
+        'laravel_version' => app()->version(),
+    ]);
+});
+
+// TEMPORARY: Database check
+Route::get('/db-check', function () {
     try {
-        // Run migrations
-        Artisan::call('migrate', ['--force' => true]);
-        $migrationOutput = Artisan::output();
-        
-        // Clear caches
-        Artisan::call('config:clear');
-        Artisan::call('cache:clear');
-        Artisan::call('route:clear');
-        
-        // Check if table exists
         $tables = DB::select('SHOW TABLES');
         $tableNames = array_map(function($table) {
             return array_values((array)$table)[0];
         }, $tables);
         
-        $pendingRegExists = in_array('pending_registrations', $tableNames);
-        
         return response()->json([
             'success' => true,
-            'message' => 'Migrations executed successfully',
-            'migration_output' => $migrationOutput,
-            'pending_registrations_exists' => $pendingRegExists,
+            'database_connected' => true,
+            'tables_count' => count($tableNames),
+            'has_users_table' => in_array('users', $tableNames),
+            'has_pending_registrations' => in_array('pending_registrations', $tableNames),
             'all_tables' => $tableNames,
         ]);
     } catch (\Exception $e) {
         return response()->json([
             'success' => false,
+            'database_connected' => false,
             'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString(),
+        ], 500);
+    }
+});
+
+// TEMPORARY: Simple migration runner
+Route::get('/run-migrations-simple', function () {
+    try {
+        // Just run migrate without complex operations
+        \Illuminate\Support\Facades\Artisan::call('migrate --force');
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Migration command executed',
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'line' => $e->getLine(),
+            'file' => $e->getFile(),
         ], 500);
     }
 });
