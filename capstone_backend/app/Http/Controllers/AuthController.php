@@ -32,9 +32,18 @@ class AuthController extends Controller
         try {
             $data = $r->validate([
                 'name'=>'required|string|max:255',
-                'email'=>'required|email|unique:users,email|unique:pending_registrations,email',
+                'email'=>'required|email|unique:users,email',
                 'password'=>'required|string|min:8|confirmed',
             ]);
+            
+            // CRITICAL FIX: If email exists in pending (user pressed back), DELETE old pending
+            $existingPending = PendingRegistration::where('email', $data['email'])->first();
+            if ($existingPending) {
+                Log::info('Donor re-registering - deleting old pending registration', [
+                    'email' => $data['email']
+                ]);
+                $existingPending->delete();
+            }
             
             // Generate 6-digit verification code
             $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
