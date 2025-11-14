@@ -71,6 +71,19 @@ class User extends Authenticatable
         'two_factor_enabled_at' => 'datetime',
     ];
 
+    protected $appends = ['profile_image_url'];
+
+    /**
+     * Get the full HTTPS URL for the user profile image
+     */
+    public function getProfileImageUrlAttribute()
+    {
+        if (!$this->profile_image) {
+            return null;
+        }
+        return 'https://backend-production-3c74.up.railway.app/storage/' . $this->profile_image;
+    }
+
     public function charities(){ return $this->hasMany(Charity::class, 'owner_id'); }
     public function charity(){ return $this->hasOne(Charity::class, 'owner_id'); }
     public function donations(){ return $this->hasMany(Donation::class, 'donor_id'); }
