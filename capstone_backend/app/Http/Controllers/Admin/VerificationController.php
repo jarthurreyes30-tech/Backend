@@ -100,8 +100,13 @@ class VerificationController extends Controller
             'donations as total_donations',
             'charityFollows as charities_supported'
         ])
-        ->when($request->boolean('only_verified'), function($q) {
+        // By default, only show verified users
+        ->when(!$request->has('include_unverified'), function($q) {
             $q->whereNotNull('email_verified_at');
+        })
+        // Allow explicitly showing all users including unverified
+        ->when($request->boolean('include_unverified'), function($q) {
+            // Include both verified and unverified
         });
 
         // Filter by role if provided

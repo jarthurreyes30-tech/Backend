@@ -1008,37 +1008,30 @@ class AuthController extends Controller
     /**
      * Minimal donor registration - only name, email, password
      * Sends verification code email
+     * User account is NOT created until email is verified
      */
     public function registerMinimal(Request $request)
     {
         try {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email',
+                'email' => 'required|email|unique:users,email|unique:pending_registrations,email',
                 'password' => 'required|string|min:8|confirmed',
-            ]);
-
-            // Create user with unverified email
-            $user = User::create([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'password' => Hash::make($validated['password']),
-                'role' => 'donor',
-                'status' => 'active',
-                'email_verified_at' => null, // Unverified
             ]);
 
             // Generate 6-digit code
             $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
             $token = \Str::random(60);
-            $expiresAt = now()->addMinutes(5); // Changed from 15 to 5 minutes
+            $expiresAt = now()->addMinutes(15);
 
-            // Create verification record
-            \App\Models\EmailVerification::create([
-                'user_id' => $user->id,
-                'email' => $user->email,
-                'code' => $code,
-                'token' => $token,
+            // Store pending registration (user account NOT created yet)
+            $pendingRegistration = \App\Models\PendingRegistration::create([
+                'name' => $validated['name'],
+                'email' => $validated['email'],
+                'password' => Hash::make($validated['password']),
+                'role' => 'donor',
+                'verification_code' => $code,
+                'verification_token' => $token,
                 'expires_at' => $expiresAt,
                 'attempts' => 0,
                 'resend_count' => 0,
@@ -1046,41 +1039,41 @@ class AuthController extends Controller
 
             // Send verification email
             try {
-                \Mail::to($user->email)->send(
+                \Mail::to($validated['email'])->send(
                     new \App\Mail\VerifyEmailMail([
-                        'name' => $user->name,
-                        'email' => $user->email,
+                        'name' => $validated['name'],
+                        'email' => $validated['email'],
                         'code' => $code,
                         'token' => $token,
-                        'expires_in' => 5,
+                        'expires_in' => 15,
                     ])
                 );
+                Log::info('Verification email sent successfully', [
+                    'email' => $validated['email'],
+                    'code' => $code,
+                ]);
             } catch (\Exception $mailError) {
                 Log::error('Email sending failed during registration', [
-                    'user_id' => $user->id,
-                    'email' => $user->email,
+                    'email' => $validated['email'],
                     'error' => $mailError->getMessage(),
+                    'trace' => $mailError->getTraceAsString(),
                 ]);
-                // Continue anyway - user is registered, they can resend
-            }
-
-            // Log registration
-            try {
-                $this->securityService->logAuthEvent('register', $user, [
-                    'role' => 'donor',
-                    'registration_method' => 'minimal',
-                    'verification_sent' => true,
-                ]);
-            } catch (\Exception $logError) {
-                // Log but don't fail registration
-                Log::error('Failed to log auth event', ['error' => $logError->getMessage()]);
+                
+                // Delete pending registration since email failed
+                $pendingRegistration->delete();
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send verification email. Please try again or contact support.',
+                    'error' => 'email_send_failed'
+                ], 500);
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Registration complete. Verification code sent to your email.',
-                'email' => $user->email,
-                'expires_in' => 5, // minutes
+                'message' => 'Verification code sent to your email. Please verify to complete registration.',
+                'email' => $validated['email'],
+                'expires_in' => 15, // minutes
             ], 201);
 
         } catch (ValidationException $e) {
@@ -1104,6 +1097,7 @@ class AuthController extends Controller
 
     /**
      * Verify email with code (primary method)
+     * Creates user account from pending registration after successful verification
      */
     public function verifyEmailCode(Request $request)
     {
@@ -1112,6 +1106,92 @@ class AuthController extends Controller
             'code' => 'required|string|size:6',
         ]);
 
+        // First check for pending registration (new flow)
+        $pendingReg = \App\Models\PendingRegistration::where('email', $validated['email'])
+            ->where('verification_code', $validated['code'])
+            ->first();
+
+        if ($pendingReg) {
+            // Check if expired
+            if ($pendingReg->isExpired()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Verification code has expired. Please register again.',
+                    'expired' => true
+                ], 400);
+            }
+
+            // Check max attempts
+            if ($pendingReg->hasMaxAttempts()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Maximum verification attempts reached. Please register again.',
+                    'max_attempts' => true
+                ], 429);
+            }
+
+            // Create the actual user account now
+            try {
+                $user = User::create([
+                    'name' => $pendingReg->name,
+                    'email' => $pendingReg->email,
+                    'password' => $pendingReg->password, // Already hashed
+                    'role' => $pendingReg->role,
+                    'status' => 'active',
+                    'email_verified_at' => now(), // Mark as verified
+                ]);
+
+                // Delete pending registration
+                $pendingReg->delete();
+
+                // Send welcome email
+                try {
+                    Mail::to($user->email)->queue(new EmailVerifiedMail($user));
+                } catch (\Exception $e) {
+                    Log::warning('Failed to send welcome email', ['error' => $e->getMessage()]);
+                }
+
+                // Log successful registration
+                try {
+                    $this->securityService->logAuthEvent('register', $user, [
+                        'role' => $user->role,
+                        'registration_method' => 'email_verified',
+                    ]);
+                } catch (\Exception $e) {
+                    Log::warning('Failed to log auth event', ['error' => $e->getMessage()]);
+                }
+
+                // Notify admins about new user
+                try {
+                    \App\Services\NotificationHelper::newUserRegistration($user);
+                } catch (\Exception $e) {
+                    Log::warning('Failed to notify admins', ['error' => $e->getMessage()]);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Email verified successfully! Your account has been created.',
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role,
+                        'email_verified_at' => $user->email_verified_at,
+                    ]
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to create user from pending registration', [
+                    'error' => $e->getMessage(),
+                    'email' => $validated['email'],
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to create account. Please try again.'
+                ], 500);
+            }
+        }
+
+        // Fallback: Check old email verification system (for existing users)
         $verification = \App\Models\EmailVerification::where('email', $validated['email'])
             ->where('code', $validated['code'])
             ->first();
@@ -1141,7 +1221,7 @@ class AuthController extends Controller
             ], 429);
         }
 
-        // Verify the code
+        // Verify the code for existing user
         $user = User::where('email', $validated['email'])->first();
 
         if (!$user) {
@@ -1244,6 +1324,7 @@ class AuthController extends Controller
 
     /**
      * Resend verification code
+     * Supports both pending registrations and existing unverified users
      */
     public function resendVerificationCode(Request $request)
     {
@@ -1251,12 +1332,74 @@ class AuthController extends Controller
             'email' => 'required|email',
         ]);
 
+        // First check for pending registration (new flow)
+        $pendingReg = \App\Models\PendingRegistration::where('email', $validated['email'])->first();
+
+        if ($pendingReg) {
+            // Check resend limit
+            if ($pendingReg->hasMaxResends()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Maximum resend limit reached. Please register again later.',
+                    'max_resends' => true
+                ], 429);
+            }
+
+            // Generate new code
+            $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
+            $token = \Str::random(60);
+            $expiresAt = now()->addMinutes(15);
+
+            // Update pending registration
+            $pendingReg->verification_code = $code;
+            $pendingReg->verification_token = $token;
+            $pendingReg->expires_at = $expiresAt;
+            $pendingReg->attempts = 0; // Reset attempts
+            $pendingReg->incrementResendCount();
+            $pendingReg->save();
+
+            // Send verification email
+            try {
+                \Mail::to($pendingReg->email)->send(
+                    new \App\Mail\VerifyEmailMail([
+                        'name' => $pendingReg->name,
+                        'email' => $pendingReg->email,
+                        'code' => $code,
+                        'token' => $token,
+                        'expires_in' => 15,
+                    ])
+                );
+                Log::info('Verification code resent successfully', [
+                    'email' => $pendingReg->email,
+                    'resend_count' => $pendingReg->resend_count,
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to resend verification email', [
+                    'email' => $pendingReg->email,
+                    'error' => $e->getMessage(),
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send verification email. Please try again.'
+                ], 500);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'A new verification code has been sent to your email.',
+                'resend_count' => $pendingReg->resend_count,
+                'remaining_resends' => 3 - $pendingReg->resend_count,
+                'expires_in' => 15,
+            ]);
+        }
+
+        // Fallback: Check for existing user (old flow)
         $user = User::where('email', $validated['email'])->first();
 
         if (!$user) {
             return response()->json([
                 'success' => false,
-                'message' => 'User not found'
+                'message' => 'No registration found for this email. Please register first.'
             ], 404);
         }
 
@@ -1299,7 +1442,7 @@ class AuthController extends Controller
         // Generate new code and token
         $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
         $token = \Str::random(60);
-        $expiresAt = now()->addMinutes(5); // Changed from 15 to 5 minutes
+        $expiresAt = now()->addMinutes(15);
 
         $verification->code = $code;
         $verification->token = $token;
@@ -1314,7 +1457,7 @@ class AuthController extends Controller
                 'email' => $user->email,
                 'code' => $code,
                 'token' => $token,
-                'expires_in' => 5,
+                'expires_in' => 15,
             ])
         );
 
@@ -1323,7 +1466,7 @@ class AuthController extends Controller
             'message' => 'A new verification code has been sent to your email.',
             'resend_count' => $verification->resend_count,
             'remaining_resends' => 3 - $verification->resend_count,
-            'expires_in' => 5,
+            'expires_in' => 15,
         ]);
     }
 }
