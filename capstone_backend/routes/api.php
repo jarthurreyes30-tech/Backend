@@ -184,12 +184,18 @@ Route::get('/locations/regions', [LocationController::class,'getRegions']);
 Route::get('/locations/regions/{regionCode}/provinces', [LocationController::class,'getProvinces']);
 Route::get('/locations/regions/{regionCode}/provinces/{provinceCode}/cities', [LocationController::class,'getCities']);
 
-// Auth
-Route::post('/auth/register', [AuthController::class,'registerDonor']);
+// Auth routes (public)
+Route::post('/auth/register', [AuthController::class, 'registerDonor']);
 Route::post('/auth/register-charity', [AuthController::class,'registerCharityAdmin']);
 Route::post('/auth/register-minimal', [AuthController::class,'registerMinimal']); // New minimal registration
 Route::post('/auth/login', [AuthController::class,'login']);
 Route::post('/auth/logout', [AuthController::class,'logout'])->middleware('auth:sanctum');
+
+// Forgot Password routes
+Route::post('/auth/forgot-password', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'sendResetCode']);
+Route::post('/auth/resend-reset-code', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'resendResetCode']);
+Route::post('/auth/verify-reset-code', [App\Http\Controllers\Auth\ForgotPasswordController::class, 'verifyResetCode']);
+Route::post('/auth/reset-password', [App\Http\Controllers\Auth\ResetPasswordController::class, 'reset']);
 
 // Email Verification (new robust system)
 Route::post('/auth/verify-email-code', [AuthController::class,'verifyEmailCode']); // Primary: code verification

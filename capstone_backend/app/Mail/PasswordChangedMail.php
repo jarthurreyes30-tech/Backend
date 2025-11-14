@@ -3,29 +3,29 @@
 namespace App\Mail;
 
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
-use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class PasswordChangedMail extends Mailable implements ShouldQueue
+class PasswordChangedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public $user;
+    public $changedAt;
     public $ipAddress;
-    public $userAgent;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(User $user, string $ipAddress = '', string $userAgent = '')
+    public function __construct(User $user, ?string $ipAddress = null)
     {
         $this->user = $user;
-        $this->ipAddress = $ipAddress;
-        $this->userAgent = $userAgent;
+        $this->changedAt = Carbon::now();
+        $this->ipAddress = $ipAddress ?? 'Unknown';
     }
 
     /**
@@ -34,7 +34,7 @@ class PasswordChangedMail extends Mailable implements ShouldQueue
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: '🔒 Password Changed Successfully - CharityHub',
+            subject: 'Password Changed Successfully - ' . config('app.name'),
         );
     }
 
@@ -45,11 +45,11 @@ class PasswordChangedMail extends Mailable implements ShouldQueue
     {
         return new Content(
             view: 'emails.auth.password-changed',
+            text: 'emails.auth.password-changed-plain',
             with: [
                 'userName' => $this->user->name,
-                'changedAt' => now()->format('F d, Y h:i A'),
+                'changedAt' => $this->changedAt->format('F d, Y h:i A'),
                 'ipAddress' => $this->ipAddress,
-                'device' => $this->parseUserAgent($this->userAgent),
                 'supportUrl' => config('app.frontend_url') . '/support',
             ],
         );
