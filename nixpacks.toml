@@ -3,16 +3,16 @@ nixPkgs = ["php", "phpPackages.composer", "nodejs_20"]
 
 [phases.install]
 cmds = [
-  "composer install --no-dev --optimize-autoloader",
-  "php artisan migrate --force",
-  "php artisan db:seed --force || true",
-  "php artisan config:cache",
-  "php artisan route:cache",
-  "php artisan view:cache"
+  "cd capstone_backend && composer install --no-dev --optimize-autoloader",
+  "cd capstone_backend && php artisan migrate --force",
+  "cd capstone_backend && php artisan db:seed --class=AdminSeeder --force || true",
+  "cd capstone_backend && php artisan config:cache",
+  "cd capstone_backend && php artisan route:cache",
+  "cd capstone_backend && php artisan view:cache"
 ]
 
 [phases.build]
 cmds = ["npm install", "npm run build"]
 
 [start]
-cmd = "php artisan serve --host=0.0.0.0 --port=$PORT"
+cmd = "cd capstone_backend && php artisan serve --host=0.0.0.0 --port=$PORT"
