@@ -30,6 +30,7 @@ return [
         'http://127.0.0.1:3000',
         'http://192.168.1.7:8080',  // Your local network IP
         'http://192.168.1.11:8080',
+        'https://giveora-ten.vercel.app',  // Production frontend
     ],
 
     'allowed_origins_patterns' => [],
