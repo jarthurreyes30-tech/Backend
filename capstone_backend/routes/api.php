@@ -12,6 +12,15 @@ use App\Http\Controllers\Admin\{VerificationController, AdminActionLogController
 // Health
 Route::get('/ping', fn () => ['ok' => true, 'time' => now()->toDateTimeString()]);
 
+// Brevo Email Testing Endpoints
+Route::prefix('brevo-test')->group(function () {
+    Route::get('/connection', [App\Http\Controllers\BrevoTestController::class, 'testConnection']);
+    Route::post('/simple-email', [App\Http\Controllers\BrevoTestController::class, 'testSimpleEmail']);
+    Route::post('/laravel-mail', [App\Http\Controllers\BrevoTestController::class, 'testLaravelMail']);
+    Route::post('/queued-email', [App\Http\Controllers\BrevoTestController::class, 'testQueuedEmail']);
+    Route::get('/config', [App\Http\Controllers\BrevoTestController::class, 'getMailConfig']);
+});
+
 // Email System
 Route::get('/email/test-connection', [EmailController::class, 'testConnection']);
 Route::post('/email/test-send', [EmailController::class, 'testSend']);
