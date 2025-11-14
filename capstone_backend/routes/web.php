@@ -19,7 +19,7 @@ Route::get('/health-check', function () {
     ]);
 });
 
-// TEMPORARY: Database check
+// TEMPORARY: Database check with cleanup
 Route::get('/db-check', function () {
     try {
         $tables = DB::select('SHOW TABLES');
@@ -27,19 +27,81 @@ Route::get('/db-check', function () {
             return array_values((array)$table)[0];
         }, $tables);
         
+        // Check pending registrations
+        $pendingCount = DB::table('pending_registrations')->count();
+        $pendingEmails = DB::table('pending_registrations')->pluck('email');
+        
         return response()->json([
             'success' => true,
             'database_connected' => true,
             'tables_count' => count($tableNames),
             'has_users_table' => in_array('users', $tableNames),
             'has_pending_registrations' => in_array('pending_registrations', $tableNames),
-            'all_tables' => $tableNames,
+            'pending_registrations_count' => $pendingCount,
+            'pending_emails' => $pendingEmails,
         ]);
     } catch (\Exception $e) {
         return response()->json([
             'success' => false,
             'database_connected' => false,
             'error' => $e->getMessage(),
+        ], 500);
+    }
+});
+
+// TEMPORARY: Clean pending registrations
+Route::get('/clean-pending', function () {
+    try {
+        $deleted = DB::table('pending_registrations')->delete();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Pending registrations cleaned',
+            'deleted_count' => $deleted,
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+});
+
+// TEMPORARY: Test SMTP directly
+Route::get('/test-smtp-direct', function () {
+    try {
+        $transport = new \Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport(
+            'smtp.gmail.com',
+            587,
+            true
+        );
+        $transport->setUsername('charityhub25@gmail.com');
+        $transport->setPassword('nnkdtchwnldeubms');
+        
+        $mailer = new \Symfony\Component\Mailer\Mailer($transport);
+        
+        $email = (new \Symfony\Component\Mime\Email())
+            ->from('charityhub25@gmail.com')
+            ->to('regondolajohnarthur51@gmail.com')
+            ->subject('Test Email from Railway')
+            ->text('This is a test email to verify SMTP connection.');
+        
+        $mailer->send($email);
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'SMTP test email sent successfully',
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+            'smtp_config' => [
+                'host' => 'smtp.gmail.com',
+                'port' => 587,
+                'username' => 'charityhub25@gmail.com',
+                'encryption' => 'tls',
+            ],
         ], 500);
     }
 });

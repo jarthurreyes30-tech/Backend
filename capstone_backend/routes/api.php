@@ -13,8 +13,46 @@ use App\Http\Controllers\Admin\{VerificationController, AdminActionLogController
 Route::get('/ping', fn () => ['ok' => true, 'time' => now()->toDateTimeString()]);
 
 // Email System
-Route::post('/test-email', [EmailController::class, 'sendTestEmail']);
 Route::get('/email/test-connection', [EmailController::class, 'testConnection']);
+Route::post('/email/test-send', [EmailController::class, 'testSend']);
+
+// TEMPORARY: Queue status and management
+Route::get('/queue/status', function () {
+    try {
+        $jobs = \DB::table('jobs')->count();
+        $failedJobs = \DB::table('failed_jobs')->count();
+        
+        return response()->json([
+            'success' => true,
+            'pending_jobs' => $jobs,
+            'failed_jobs' => $failedJobs,
+            'queue_connection' => config('queue.default'),
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+});
+
+Route::get('/queue/process', function () {
+    try {
+        \Artisan::call('queue:work', ['--once' => true, '--timeout' => 60]);
+        $output = \Artisan::output();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Queue processed',
+            'output' => $output,
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+});
 
 // Authentication Email System
 Route::post('/email/send-verification', [AuthEmailController::class, 'sendVerification']);
