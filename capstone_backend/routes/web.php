@@ -44,15 +44,61 @@ Route::get('/db-check', function () {
     }
 });
 
-// TEMPORARY: Simple migration runner
-Route::get('/run-migrations-simple', function () {
+// TEMPORARY: Clear all caches
+Route::get('/clear-all-caches', function () {
     try {
-        // Just run migrate without complex operations
-        \Illuminate\Support\Facades\Artisan::call('migrate --force');
+        \Illuminate\Support\Facades\Artisan::call('config:clear');
+        \Illuminate\Support\Facades\Artisan::call('cache:clear');
+        \Illuminate\Support\Facades\Artisan::call('route:clear');
+        \Illuminate\Support\Facades\Artisan::call('view:clear');
+        \Illuminate\Support\Facades\Artisan::call('optimize:clear');
         
         return response()->json([
             'success' => true,
-            'message' => 'Migration command executed',
+            'message' => 'All caches cleared successfully',
+            'cleared' => ['config', 'cache', 'routes', 'views', 'compiled']
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage(),
+        ], 500);
+    }
+});
+
+// TEMPORARY: Test registration endpoint
+Route::post('/test-registration', function (\Illuminate\Http\Request $request) {
+    try {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email|unique:pending_registrations,email',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        // Generate 6-digit code
+        $code = str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
+        $token = \Str::random(60);
+        $expiresAt = now()->addMinutes(15);
+
+        // Store pending registration
+        $pendingRegistration = \App\Models\PendingRegistration::create([
+            'name' => $validated['name'],
+            'email' => $validated['email'],
+            'password' => \Hash::make($validated['password']),
+            'role' => 'donor',
+            'verification_code' => $code,
+            'verification_token' => $token,
+            'expires_at' => $expiresAt,
+            'attempts' => 0,
+            'resend_count' => 0,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Test registration successful - NO EMAIL SENT',
+            'email' => $validated['email'],
+            'code' => $code,
+            'pending_id' => $pendingRegistration->id,
         ]);
     } catch (\Exception $e) {
         return response()->json([
