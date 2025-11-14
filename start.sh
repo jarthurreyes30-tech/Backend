@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -e
 
-# Laravel backend entrypoint for Railpack / Nixpacks
-# This script starts the PHP API that contains all 3 role-based flows
-# (admin, charity, donor) inside the capstone_backend Laravel app.
+# Laravel backend entrypoint for Nixpacks / Railway
+# Starts the PHP API (admin, charity, donor flows) in the capstone_backend app.
 
 # Default environment for container
 export APP_ENV="${APP_ENV:-production}"
@@ -16,12 +15,7 @@ export APP_URL="${APP_URL:-http://0.0.0.0:${PORT}}"
 # Move into the Laravel backend
 cd capstone_backend
 
-# Install PHP dependencies if vendor is missing
-if [ ! -d "vendor" ]; then
-  composer install --no-interaction --prefer-dist --optimize-autoloader
-fi
-
-# Optimize Laravel for production
+# Optimize Laravel for production (safe if already done)
 php artisan config:cache || true
 php artisan route:cache || true
 php artisan view:cache || true
