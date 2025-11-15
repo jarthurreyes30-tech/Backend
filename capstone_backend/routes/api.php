@@ -32,6 +32,12 @@ Route::get('/test-email/config', [\App\Http\Controllers\EmailTestController::cla
 // Debug Email Endpoint
 Route::post('/debug-email', [\App\Http\Controllers\DebugEmailController::class, 'testBrevo']);
 
+// Simple Tests
+Route::get('/simple-test-1', [\App\Http\Controllers\SimpleTestController::class, 'test1']);
+Route::get('/simple-test-2', [\App\Http\Controllers\SimpleTestController::class, 'test2']);
+Route::get('/simple-test-3', [\App\Http\Controllers\SimpleTestController::class, 'test3']);
+Route::post('/simple-test-4', [\App\Http\Controllers\SimpleTestController::class, 'test4']);
+
 // Test image upload endpoint
 Route::post('/test-image-upload', function (Request $request) {
     try {
