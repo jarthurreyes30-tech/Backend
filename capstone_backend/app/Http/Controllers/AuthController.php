@@ -36,18 +36,9 @@ class AuthController extends Controller
                 'password'=>'required|string|min:8|confirmed',
             ]);
             
-            // CRITICAL FIX: If email exists in pending (user pressed back), DELETE old pending
-            $existingPending = PendingRegistration::where('email', $data['email'])->first();
-            if ($existingPending) {
-                Log::info('Donor re-registering - deleting old pending registration', [
-                    'email' => $data['email']
-                ]);
-                $existingPending->delete();
-            }
-            
             // Generate 6-digit verification code
             $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-            $token = bin2hex(random_bytes(32));
+            $expiresAt = now()->addMinutes(10);
             
             // Store registration data including profile fields
             $registrationData = [
@@ -69,26 +60,29 @@ class AuthController extends Controller
                 'pref_reports' => $r->boolean('pref_reports', false),
             ];
             
-            // Create pending registration - NO USER CREATED YET
-            $pending = PendingRegistration::create([
-                'name' => $data['name'],
-                'email' => $data['email'],
-                'password' => Hash::make($data['password']),
-                'role' => 'donor',
-                'verification_code' => $code,
-                'verification_token' => $token,
-                'expires_at' => now()->addMinutes(15),
-                'attempts' => 0,
-                'resend_count' => 0,
-                'registration_data' => $registrationData,
+            // ✅ DONOR FIX: Store in SESSION only - NO DATABASE until verified
+            session([
+                'pending_donor_registration' => [
+                    'name' => $data['name'],
+                    'email' => $data['email'],
+                    'password' => Hash::make($data['password']),
+                    'role' => 'donor',
+                    'verification_code' => $code,
+                    'expires_at' => $expiresAt->toIso8601String(),
+                    'attempts' => 0,
+                    'resend_count' => 0,
+                    'registration_data' => $registrationData,
+                    'created_at' => now()->toIso8601String(),
+                ]
             ]);
 
-            Log::info('Donor registration pending - awaiting verification', [
+            Log::info('✅ Donor registration stored in SESSION - awaiting verification (NO DB)', [
                 'email' => $data['email'],
                 'name' => $data['name'],
+                'expires_at' => $expiresAt->toIso8601String()
             ]);
 
-            // Send verification code email IMMEDIATELY - Direct Brevo call
+            // Send verification code email
             try {
                 $brevoMailer = app(\App\Services\BrevoMailer::class);
                 $brevoMailer->send(
@@ -98,27 +92,28 @@ class AuthController extends Controller
                     view('emails.verification-code', [
                         'name' => $data['name'],
                         'code' => $code,
-                        'expiresAt' => $pending->expires_at,
+                        'expiresAt' => $expiresAt,
                         'email' => $data['email']
                     ])->render(),
                     view('emails.verification-code-plain', [
                         'name' => $data['name'],
                         'code' => $code,
-                        'expiresAt' => $pending->expires_at,
+                        'expiresAt' => $expiresAt,
                         'email' => $data['email']
                     ])->render()
                 );
-                Log::info('Donor verification email sent', ['email' => $data['email']]);
+                Log::info('✅ Donor verification email sent', ['email' => $data['email']]);
             } catch (\Exception $e) {
                 Log::error('CRITICAL: Failed to send donor verification email', [
                     'email' => $data['email'],
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString()
                 ]);
-                $pending->delete();
+                // Clear session on email failure
+                session()->forget('pending_donor_registration');
                 return response()->json([
                     'success' => false,
-                    'message' => 'Failed to send verification email.',
+                    'message' => 'Failed to send verification email. Please try again.',
                     'error' => $e->getMessage()
                 ], 500);
             }
@@ -127,7 +122,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Verification code sent! Check your email to complete registration.',
                 'email' => $data['email'],
-                'expires_at' => $pending->expires_at->toIso8601String(),
+                'expires_at' => $expiresAt->toIso8601String(),
                 'requires_verification' => true,
             ], 200);
         } catch (ValidationException $e) {
@@ -1189,15 +1184,25 @@ class AuthController extends Controller
                 'code' => 'required|string|size:6',
             ]);
 
+            // ✅ STEP 1: Check SESSION for donor registration (NEW FLOW)
+            $sessionData = session('pending_donor_registration');
+            
+            if ($sessionData && $sessionData['email'] === $validated['email']) {
+                // ✅ DONOR VERIFICATION (SESSION-BASED)
+                return $this->verifyDonorFromSession($sessionData, $validated['code']);
+            }
+
+            // ✅ STEP 2: Check DATABASE for charity registration (UNCHANGED)
             $pending = PendingRegistration::where('email', $validated['email'])->first();
 
             if (!$pending) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'No pending registration found.'
+                    'message' => 'No pending registration found. Please register again.'
                 ], 404);
             }
 
+            // ✅ CHARITY VERIFICATION (DATABASE-BASED - UNCHANGED)
             if ($pending->isExpired()) {
                 $pending->delete();
                 return response()->json([
@@ -1236,31 +1241,33 @@ class AuthController extends Controller
                     'status' => 'active',
                 ]);
 
-                // Create donor profile with stored registration data
-                $regData = $pending->registration_data ?? [];
-                $nameParts = explode(' ', $pending->name, 3);
-                
-                $user->donorProfile()->create([
-                    'first_name' => $nameParts[0] ?? 'User',
-                    'middle_name' => isset($nameParts[2]) ? $nameParts[1] : null,
-                    'last_name' => $nameParts[count($nameParts) - 1] ?? 'Name',
-                    'gender' => $regData['gender'] ?? null,
-                    'date_of_birth' => $regData['date_of_birth'] ?? null,
-                    'street_address' => $regData['street_address'] ?? null,
-                    'barangay' => $regData['barangay'] ?? null,
-                    'city' => $regData['city'] ?? null,
-                    'province' => $regData['province'] ?? null,
-                    'region' => $regData['region'] ?? null,
-                    'postal_code' => $regData['postal_code'] ?? null,
-                    'country' => $regData['country'] ?? 'Philippines',
-                    'full_address' => $regData['full_address'] ?? null,
-                    'cause_preferences' => $regData['cause_preferences'] ?? null,
-                    'pref_email' => $regData['pref_email'] ?? true,
-                    'pref_sms' => $regData['pref_sms'] ?? false,
-                    'pref_updates' => $regData['pref_updates'] ?? true,
-                    'pref_urgent' => $regData['pref_urgent'] ?? true,
-                    'pref_reports' => $regData['pref_reports'] ?? false,
-                ]);
+                // Create donor profile if it's a donor
+                if ($pending->role === 'donor') {
+                    $regData = $pending->registration_data ?? [];
+                    $nameParts = explode(' ', $pending->name, 3);
+                    
+                    $user->donorProfile()->create([
+                        'first_name' => $nameParts[0] ?? 'User',
+                        'middle_name' => isset($nameParts[2]) ? $nameParts[1] : null,
+                        'last_name' => $nameParts[count($nameParts) - 1] ?? 'Name',
+                        'gender' => $regData['gender'] ?? null,
+                        'date_of_birth' => $regData['date_of_birth'] ?? null,
+                        'street_address' => $regData['street_address'] ?? null,
+                        'barangay' => $regData['barangay'] ?? null,
+                        'city' => $regData['city'] ?? null,
+                        'province' => $regData['province'] ?? null,
+                        'region' => $regData['region'] ?? null,
+                        'postal_code' => $regData['postal_code'] ?? null,
+                        'country' => $regData['country'] ?? 'Philippines',
+                        'full_address' => $regData['full_address'] ?? null,
+                        'cause_preferences' => $regData['cause_preferences'] ?? null,
+                        'pref_email' => $regData['pref_email'] ?? true,
+                        'pref_sms' => $regData['pref_sms'] ?? false,
+                        'pref_updates' => $regData['pref_updates'] ?? true,
+                        'pref_urgent' => $regData['pref_urgent'] ?? true,
+                        'pref_reports' => $regData['pref_reports'] ?? false,
+                    ]);
+                }
 
                 // Delete pending record
                 $pending->delete();
@@ -1268,7 +1275,8 @@ class AuthController extends Controller
 
                 Log::info('✅ Email verified - user account CREATED', [
                     'user_id' => $user->id,
-                    'email' => $user->email
+                    'email' => $user->email,
+                    'role' => $user->role
                 ]);
 
                 // Send welcome email
@@ -1307,6 +1315,128 @@ class AuthController extends Controller
     }
 
     /**
+     * ✅ NEW: Verify donor from session (NO DATABASE until now)
+     */
+    private function verifyDonorFromSession($sessionData, $code)
+    {
+        try {
+            // Check if expired
+            $expiresAt = \Carbon\Carbon::parse($sessionData['expires_at']);
+            if (now()->gt($expiresAt)) {
+                session()->forget('pending_donor_registration');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Verification code expired. Please register again.'
+                ], 410);
+            }
+
+            // Check max attempts
+            if ($sessionData['attempts'] >= 5) {
+                session()->forget('pending_donor_registration');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Too many failed attempts. Please register again.'
+                ], 429);
+            }
+
+            // Check code
+            if ($sessionData['verification_code'] !== $code) {
+                // Increment attempts
+                $sessionData['attempts']++;
+                session(['pending_donor_registration' => $sessionData]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid verification code.',
+                    'remaining_attempts' => 5 - $sessionData['attempts']
+                ], 422);
+            }
+
+            // ✅ CODE CORRECT! Create user account NOW (FIRST TIME IN DATABASE)
+            DB::beginTransaction();
+            try {
+                $user = User::create([
+                    'name' => $sessionData['name'],
+                    'email' => $sessionData['email'],
+                    'password' => $sessionData['password'], // Already hashed
+                    'role' => 'donor',
+                    'email_verified_at' => now(),
+                    'verification_status' => 'verified',
+                    'status' => 'active',
+                ]);
+
+                // Create donor profile
+                $regData = $sessionData['registration_data'] ?? [];
+                $nameParts = explode(' ', $sessionData['name'], 3);
+                
+                $user->donorProfile()->create([
+                    'first_name' => $nameParts[0] ?? 'User',
+                    'middle_name' => isset($nameParts[2]) ? $nameParts[1] : null,
+                    'last_name' => $nameParts[count($nameParts) - 1] ?? 'Name',
+                    'gender' => $regData['gender'] ?? null,
+                    'date_of_birth' => $regData['date_of_birth'] ?? null,
+                    'street_address' => $regData['street_address'] ?? null,
+                    'barangay' => $regData['barangay'] ?? null,
+                    'city' => $regData['city'] ?? null,
+                    'province' => $regData['province'] ?? null,
+                    'region' => $regData['region'] ?? null,
+                    'postal_code' => $regData['postal_code'] ?? null,
+                    'country' => $regData['country'] ?? 'Philippines',
+                    'full_address' => $regData['full_address'] ?? null,
+                    'cause_preferences' => $regData['cause_preferences'] ?? null,
+                    'pref_email' => $regData['pref_email'] ?? true,
+                    'pref_sms' => $regData['pref_sms'] ?? false,
+                    'pref_updates' => $regData['pref_updates'] ?? true,
+                    'pref_urgent' => $regData['pref_urgent'] ?? true,
+                    'pref_reports' => $regData['pref_reports'] ?? false,
+                ]);
+
+                // Clear session
+                session()->forget('pending_donor_registration');
+                DB::commit();
+
+                Log::info('✅✅✅ DONOR verified - user account CREATED from SESSION', [
+                    'user_id' => $user->id,
+                    'email' => $user->email
+                ]);
+
+                // Send welcome email
+                try {
+                    Mail::to($user->email)->send(new \App\Mail\WelcomeEmail($user));
+                    Log::info('Welcome email sent', ['user_id' => $user->id]);
+                } catch (\Exception $e) {
+                    Log::error('Welcome email failed', ['error' => $e->getMessage()]);
+                }
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Email verified! Your account has been created successfully.',
+                    'user' => [
+                        'id' => $user->id,
+                        'name' => $user->name,
+                        'email' => $user->email,
+                        'role' => $user->role,
+                    ],
+                ], 201);
+            } catch (\Exception $e) {
+                DB::rollBack();
+                session()->forget('pending_donor_registration');
+                Log::error('Failed to create donor from session', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                throw $e;
+            }
+        } catch (\Throwable $e) {
+            Log::error('Donor session verification failed', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Server error: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Resend verification code
      */
     public function resendRegistrationCode(Request $request)
@@ -1314,6 +1444,15 @@ class AuthController extends Controller
         try {
             $validated = $request->validate(['email' => 'required|email']);
 
+            // ✅ STEP 1: Check SESSION for donor (NEW FLOW)
+            $sessionData = session('pending_donor_registration');
+            
+            if ($sessionData && $sessionData['email'] === $validated['email']) {
+                // ✅ DONOR RESEND (SESSION-BASED)
+                return $this->resendDonorCode($sessionData);
+            }
+
+            // ✅ STEP 2: Check DATABASE for charity (UNCHANGED)
             $pending = PendingRegistration::where('email', $validated['email'])->first();
 
             if (!$pending) {
@@ -1382,6 +1521,82 @@ class AuthController extends Controller
             ], 200);
         } catch (\Throwable $e) {
             Log::error('Resend failed', ['error' => $e->getMessage()]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Server error.'
+            ], 500);
+        }
+    }
+
+    /**
+     * ✅ NEW: Resend code for donor in session
+     */
+    private function resendDonorCode($sessionData)
+    {
+        try {
+            // Check max resends
+            if ($sessionData['resend_count'] >= 3) {
+                session()->forget('pending_donor_registration');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Maximum resend limit reached. Please register again.'
+                ], 429);
+            }
+
+            // Generate new code
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $expiresAt = now()->addMinutes(10);
+            
+            // Update session
+            $sessionData['verification_code'] = $code;
+            $sessionData['expires_at'] = $expiresAt->toIso8601String();
+            $sessionData['attempts'] = 0;
+            $sessionData['resend_count']++;
+            session(['pending_donor_registration' => $sessionData]);
+
+            // Send email
+            try {
+                $brevoMailer = app(\App\Services\BrevoMailer::class);
+                $brevoMailer->send(
+                    $sessionData['email'],
+                    $sessionData['name'],
+                    'Verify Your Email - GiveOra',
+                    view('emails.verification-code', [
+                        'name' => $sessionData['name'],
+                        'code' => $code,
+                        'expiresAt' => $expiresAt,
+                        'email' => $sessionData['email']
+                    ])->render(),
+                    view('emails.verification-code-plain', [
+                        'name' => $sessionData['name'],
+                        'code' => $code,
+                        'expiresAt' => $expiresAt,
+                        'email' => $sessionData['email']
+                    ])->render()
+                );
+                Log::info('✅ Donor resend verification email sent from SESSION', [
+                    'email' => $sessionData['email']
+                ]);
+            } catch (\Exception $e) {
+                Log::error('CRITICAL: Donor resend email failed', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString()
+                ]);
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Failed to send email.',
+                    'error' => $e->getMessage()
+                ], 500);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'New verification code sent!',
+                'expires_at' => $expiresAt->toIso8601String(),
+                'remaining_resends' => 3 - $sessionData['resend_count']
+            ], 200);
+        } catch (\Throwable $e) {
+            Log::error('Donor resend failed', ['error' => $e->getMessage()]);
             return response()->json([
                 'success' => false,
                 'message' => 'Server error.'
