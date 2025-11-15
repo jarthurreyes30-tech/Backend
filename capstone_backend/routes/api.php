@@ -29,6 +29,9 @@ Route::post('/email/test-send', [EmailController::class, 'testSend']);
 Route::post('/test-email', [\App\Http\Controllers\EmailTestController::class, 'testDirectEmail']);
 Route::get('/test-email/config', [\App\Http\Controllers\EmailTestController::class, 'checkBrevoConfig']);
 
+// Debug Email Endpoint
+Route::post('/debug-email', [\App\Http\Controllers\DebugEmailController::class, 'testBrevo']);
+
 // Test image upload endpoint
 Route::post('/test-image-upload', function (Request $request) {
     try {
