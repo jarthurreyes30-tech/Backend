@@ -1081,35 +1081,38 @@ class AuthController extends Controller
         try {
             $validated = $request->validate([
                 'name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users,email|unique:pending_registrations,email',
+                'email' => 'required|email|unique:users,email',
                 'password' => 'required|string|min:8|confirmed',
             ]);
 
             // Generate 6-digit verification code
             $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-            $token = bin2hex(random_bytes(32));
+            $expiresAt = now()->addMinutes(10);
             
-            // Create pending registration - account NOT created yet
-            $pending = PendingRegistration::create([
-                'name' => $validated['name'],
-                'email' => $validated['email'],
-                'password' => Hash::make($validated['password']),
-                'role' => 'donor',
-                'verification_code' => $code,
-                'verification_token' => $token,
-                'expires_at' => now()->addMinutes(15),
-                'attempts' => 0,
-                'resend_count' => 0,
+            // ✅ FIX: Store in SESSION only - NO DATABASE until verified
+            session([
+                'pending_donor_registration' => [
+                    'name' => $validated['name'],
+                    'email' => $validated['email'],
+                    'password' => Hash::make($validated['password']),
+                    'role' => 'donor',
+                    'verification_code' => $code,
+                    'expires_at' => $expiresAt->toIso8601String(),
+                    'attempts' => 0,
+                    'resend_count' => 0,
+                    'registration_data' => [],
+                    'created_at' => now()->toIso8601String(),
+                ]
             ]);
 
-            Log::info('Pending registration created - awaiting email verification', [
+            Log::info('✅ MINIMAL: Donor registration stored in SESSION - awaiting verification (NO DB)', [
                 'email' => $validated['email'],
                 'name' => $validated['name'],
+                'expires_at' => $expiresAt->toIso8601String()
             ]);
 
-            // Send verification code email IMMEDIATELY (FORCE no queue!)
+            // Send verification code email
             try {
-                // Use BrevoMailer directly to bypass ALL queuing
                 $brevoMailer = app(\App\Services\BrevoMailer::class);
                 $brevoMailer->send(
                     $validated['email'],
@@ -1118,19 +1121,18 @@ class AuthController extends Controller
                     view('emails.verification-code', [
                         'name' => $validated['name'],
                         'code' => $code,
-                        'expiresAt' => $pending->expires_at,
+                        'expiresAt' => $expiresAt,
                         'email' => $validated['email']
                     ])->render(),
                     view('emails.verification-code-plain', [
                         'name' => $validated['name'],
                         'code' => $code,
-                        'expiresAt' => $pending->expires_at,
+                        'expiresAt' => $expiresAt,
                         'email' => $validated['email']
                     ])->render()
                 );
-                Log::info('Verification email sent immediately', [
-                    'email' => $validated['email'],
-                    'code_sent' => true
+                Log::info('✅ MINIMAL: Donor verification email sent', [
+                    'email' => $validated['email']
                 ]);
             } catch (\Exception $e) {
                 Log::error('CRITICAL: Failed to send verification email', [
@@ -1138,7 +1140,8 @@ class AuthController extends Controller
                     'error' => $e->getMessage(),
                     'trace' => $e->getTraceAsString()
                 ]);
-                $pending->delete();
+                // Clear session on email failure
+                session()->forget('pending_donor_registration');
                 return response()->json([
                     'success' => false,
                     'message' => 'Failed to send verification email. Please try again.',
@@ -1150,7 +1153,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Verification code sent to your email! Please verify to complete registration.',
                 'email' => $validated['email'],
-                'expires_at' => $pending->expires_at->toIso8601String(),
+                'expires_at' => $expiresAt->toIso8601String(),
                 'requires_verification' => true,
             ], 200);
 
