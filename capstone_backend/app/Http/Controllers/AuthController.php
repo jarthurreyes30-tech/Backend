@@ -1341,13 +1341,23 @@ class AuthController extends Controller
             $pending->incrementResendCount();
 
             try {
-                Mail::to($validated['email'])->send(
-                    new \App\Mail\VerificationCodeMail(
-                        $pending->name,
-                        $pending->email,
-                        $code,
-                        $pending->expires_at
-                    )
+                $brevoMailer = app(\App\Services\BrevoMailer::class);
+                $brevoMailer->send(
+                    $validated['email'],
+                    $pending->name,
+                    'Verify Your Email - GiveOra',
+                    view('emails.verification-code', [
+                        'name' => $pending->name,
+                        'code' => $code,
+                        'expiresAt' => $pending->expires_at,
+                        'email' => $pending->email
+                    ])->render(),
+                    view('emails.verification-code-plain', [
+                        'name' => $pending->name,
+                        'code' => $code,
+                        'expiresAt' => $pending->expires_at,
+                        'email' => $pending->email
+                    ])->render()
                 );
                 Log::info('Resend verification email sent', [
                     'email' => $validated['email']
