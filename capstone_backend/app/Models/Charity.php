@@ -29,7 +29,7 @@ class Charity extends Model
         'campaigns_count' => 'integer',
     ];
 
-    protected $appends = ['logo_url', 'cover_image_url'];
+    protected $appends = ['logo_url', 'cover_image_url', 'email', 'phone', 'admin_name'];
 
     /**
      * Get the full HTTPS URL for the charity logo
@@ -51,6 +51,35 @@ class Charity extends Model
             return null;
         }
         return 'https://backend-production-3c74.up.railway.app/storage/' . $this->cover_image;
+    }
+
+    /**
+     * Get email - tries primary_email first, then contact_email
+     */
+    public function getEmailAttribute()
+    {
+        return $this->attributes['primary_email'] ?? $this->attributes['contact_email'] ?? null;
+    }
+
+    /**
+     * Get phone - tries primary_phone first, then contact_phone
+     */
+    public function getPhoneAttribute()
+    {
+        return $this->attributes['primary_phone'] ?? $this->attributes['contact_phone'] ?? null;
+    }
+
+    /**
+     * Get admin name from primary contact fields
+     */
+    public function getAdminNameAttribute()
+    {
+        $parts = array_filter([
+            $this->attributes['primary_first_name'] ?? null,
+            $this->attributes['primary_middle_initial'] ?? null,
+            $this->attributes['primary_last_name'] ?? null
+        ]);
+        return !empty($parts) ? implode(' ', $parts) : null;
     }
 
     /**
