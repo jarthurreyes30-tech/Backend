@@ -88,15 +88,25 @@ class AuthController extends Controller
                 'name' => $data['name'],
             ]);
 
-            // Send verification code email IMMEDIATELY
+            // Send verification code email IMMEDIATELY - Direct Brevo call
             try {
-                Mail::to($data['email'])->send(
-                    new \App\Mail\VerificationCodeMail(
-                        $data['name'],
-                        $data['email'],
-                        $code,
-                        $pending->expires_at
-                    )
+                $brevoMailer = app(\App\Services\BrevoMailer::class);
+                $brevoMailer->send(
+                    $data['email'],
+                    $data['name'],
+                    'Verify Your Email - GiveOra',
+                    view('emails.verification-code', [
+                        'name' => $data['name'],
+                        'code' => $code,
+                        'expiresAt' => $pending->expires_at,
+                        'email' => $data['email']
+                    ])->render(),
+                    view('emails.verification-code-plain', [
+                        'name' => $data['name'],
+                        'code' => $code,
+                        'expiresAt' => $pending->expires_at,
+                        'email' => $data['email']
+                    ])->render()
                 );
                 Log::info('Donor verification email sent', ['email' => $data['email']]);
             } catch (\Exception $e) {
@@ -1102,15 +1112,26 @@ class AuthController extends Controller
                 'name' => $validated['name'],
             ]);
 
-            // Send verification code email IMMEDIATELY (not queued)
+            // Send verification code email IMMEDIATELY (FORCE no queue!)
             try {
-                Mail::to($validated['email'])->send(
-                    new \App\Mail\VerificationCodeMail(
-                        $validated['name'],
-                        $validated['email'],
-                        $code,
-                        $pending->expires_at
-                    )
+                // Use BrevoMailer directly to bypass ALL queuing
+                $brevoMailer = app(\App\Services\BrevoMailer::class);
+                $brevoMailer->send(
+                    $validated['email'],
+                    $validated['name'],
+                    'Verify Your Email - GiveOra',
+                    view('emails.verification-code', [
+                        'name' => $validated['name'],
+                        'code' => $code,
+                        'expiresAt' => $pending->expires_at,
+                        'email' => $validated['email']
+                    ])->render(),
+                    view('emails.verification-code-plain', [
+                        'name' => $validated['name'],
+                        'code' => $code,
+                        'expiresAt' => $pending->expires_at,
+                        'email' => $validated['email']
+                    ])->render()
                 );
                 Log::info('Verification email sent immediately', [
                     'email' => $validated['email'],
