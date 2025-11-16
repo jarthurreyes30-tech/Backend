@@ -29,9 +29,11 @@ return new class extends Migration
             echo "Updated {$invalidLogs->count()} fund usage logs with invalid amounts to ₱1.\n";
         }
 
-        // Now add the CHECK constraint
-        // Note: MySQL 8.0.16+ supports CHECK constraints
-        DB::statement('ALTER TABLE fund_usage_logs ADD CONSTRAINT fund_usage_logs_amount_min CHECK (amount >= 1)');
+        // Now add the CHECK constraint (MySQL 8.0.16+ only)
+        $driver = DB::connection()->getDriverName();
+        if (in_array($driver, ['mysql', 'mariadb'])) {
+            DB::statement('ALTER TABLE fund_usage_logs ADD CONSTRAINT fund_usage_logs_amount_min CHECK (amount >= 1)');
+        }
     }
 
     /**
@@ -39,8 +41,11 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Drop the CHECK constraint
-        DB::statement('ALTER TABLE fund_usage_logs DROP CHECK fund_usage_logs_amount_min');
+        // Drop the CHECK constraint (MySQL/MariaDB only)
+        $driver = DB::connection()->getDriverName();
+        if (in_array($driver, ['mysql', 'mariadb'])) {
+            DB::statement('ALTER TABLE fund_usage_logs DROP CHECK fund_usage_logs_amount_min');
+        }
         
         // Note: We don't revert the amount updates as those were invalid data
     }

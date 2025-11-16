@@ -26,37 +26,41 @@ return new class extends Migration
             $table->index(['total_donations_received', 'verification_status']);
         });
 
-        // Backfill existing data - calculate totals from completed donations
-        DB::statement("
-            UPDATE charities c
-            LEFT JOIN (
-                SELECT 
-                    charity_id,
-                    SUM(amount) as total_received,
-                    COUNT(DISTINCT donor_id) as unique_donors
-                FROM donations
-                WHERE status = 'completed'
-                GROUP BY charity_id
-            ) d ON c.id = d.charity_id
-            SET 
-                c.total_donations_received = COALESCE(d.total_received, 0),
-                c.donors_count = COALESCE(d.unique_donors, 0)
-        ");
+        // Backfill existing data - calculate totals from completed donations (MySQL/MariaDB only)
+        if (DB::connection()->getDriverName() === 'mysql' || DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("
+                UPDATE charities c
+                LEFT JOIN (
+                    SELECT 
+                        charity_id,
+                        SUM(amount) as total_received,
+                        COUNT(DISTINCT donor_id) as unique_donors
+                    FROM donations
+                    WHERE status = 'completed'
+                    GROUP BY charity_id
+                ) d ON c.id = d.charity_id
+                SET 
+                    c.total_donations_received = COALESCE(d.total_received, 0),
+                    c.donors_count = COALESCE(d.unique_donors, 0)
+            ");
+        }
 
-        // Backfill campaigns count
-        DB::statement("
-            UPDATE charities c
-            LEFT JOIN (
-                SELECT 
-                    charity_id,
-                    COUNT(*) as campaign_count
-                FROM campaigns
-                WHERE status IN ('published', 'closed')
-                GROUP BY charity_id
-            ) camp ON c.id = camp.charity_id
-            SET 
-                c.campaigns_count = COALESCE(camp.campaign_count, 0)
-        ");
+        // Backfill campaigns count (MySQL/MariaDB only)
+        if (DB::connection()->getDriverName() === 'mysql' || DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("
+                UPDATE charities c
+                LEFT JOIN (
+                    SELECT 
+                        charity_id,
+                        COUNT(*) as campaign_count
+                    FROM campaigns
+                    WHERE status IN ('published', 'closed')
+                    GROUP BY charity_id
+                ) camp ON c.id = camp.charity_id
+                SET 
+                    c.campaigns_count = COALESCE(camp.campaign_count, 0)
+            ");
+        }
     }
 
     /**

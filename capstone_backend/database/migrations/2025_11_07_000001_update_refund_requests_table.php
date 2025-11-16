@@ -16,11 +16,25 @@ return new class extends Migration
             });
             
             // Populate charity_id from donations table for existing records
-            DB::statement('
-                UPDATE refund_requests r
-                INNER JOIN donations d ON r.donation_id = d.id
-                SET r.charity_id = d.charity_id
-            ');
+            $driver = DB::connection()->getDriverName();
+            if (in_array($driver, ['mysql', 'mariadb'])) {
+                DB::statement('
+                    UPDATE refund_requests r
+                    INNER JOIN donations d ON r.donation_id = d.id
+                    SET r.charity_id = d.charity_id
+                ');
+            } else {
+                // SQLite-friendly approach: hydrate and update row-by-row
+                $rows = DB::table('refund_requests')->select('id','donation_id')->get();
+                foreach ($rows as $row) {
+                    if ($row->donation_id) {
+                        $charityId = DB::table('donations')->where('id', $row->donation_id)->value('charity_id');
+                        if ($charityId) {
+                            DB::table('refund_requests')->where('id', $row->id)->update(['charity_id' => $charityId]);
+                        }
+                    }
+                }
+            }
             
             // Now make charity_id required and add foreign key
             Schema::table('refund_requests', function (Blueprint $table) {
@@ -50,8 +64,10 @@ return new class extends Migration
             });
         }
         
-        // Update status enum
-        DB::statement("ALTER TABLE refund_requests MODIFY status ENUM('pending', 'approved', 'denied', 'cancelled') DEFAULT 'pending'");
+        // Update status enum (MySQL/MariaDB only)
+        if (in_array(DB::connection()->getDriverName(), ['mysql', 'mariadb'])) {
+            DB::statement("ALTER TABLE refund_requests MODIFY status ENUM('pending', 'approved', 'denied', 'cancelled') DEFAULT 'pending'");
+        }
     }
 
     public function down(): void
@@ -68,6 +84,8 @@ return new class extends Migration
             });
         }
         
-        DB::statement("ALTER TABLE refund_requests MODIFY status ENUM('pending', 'approved', 'rejected', 'completed') DEFAULT 'pending'");
+        if (in_array(DB::connection()->getDriverName(), ['mysql', 'mariadb'])) {
+            DB::statement("ALTER TABLE refund_requests MODIFY status ENUM('pending', 'approved', 'rejected', 'completed') DEFAULT 'pending'");
+        }
     }
 };

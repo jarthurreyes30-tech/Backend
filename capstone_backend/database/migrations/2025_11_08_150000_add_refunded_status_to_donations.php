@@ -13,7 +13,9 @@ return new class extends Migration
     public function up(): void
     {
         // For MySQL/MariaDB, we need to use raw SQL to modify the enum
-        DB::statement("ALTER TABLE donations MODIFY COLUMN status ENUM('pending', 'completed', 'rejected', 'refunded') NOT NULL DEFAULT 'pending'");
+        if (DB::connection()->getDriverName() === 'mysql' || DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("ALTER TABLE donations MODIFY COLUMN status ENUM('pending', 'completed', 'rejected', 'refunded') NOT NULL DEFAULT 'pending'");
+        }
     }
 
     /**
@@ -26,7 +28,9 @@ return new class extends Migration
             ->where('status', 'refunded')
             ->update(['status' => 'completed']);
         
-        // Remove 'refunded' from enum
-        DB::statement("ALTER TABLE donations MODIFY COLUMN status ENUM('pending', 'completed', 'rejected') NOT NULL DEFAULT 'pending'");
+        // Remove 'refunded' from enum (MySQL/MariaDB only)
+        if (DB::connection()->getDriverName() === 'mysql' || DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("ALTER TABLE donations MODIFY COLUMN status ENUM('pending', 'completed', 'rejected') NOT NULL DEFAULT 'pending'");
+        }
     }
 };

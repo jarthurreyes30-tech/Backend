@@ -23,22 +23,24 @@ return new class extends Migration
             $table->index(['total_donations_received', 'status']);
         });
 
-        // Backfill existing data - calculate totals from completed donations
-        DB::statement("
-            UPDATE campaigns c
-            LEFT JOIN (
-                SELECT 
-                    campaign_id,
-                    SUM(amount) as total_received,
-                    COUNT(DISTINCT donor_id) as unique_donors
-                FROM donations
-                WHERE status = 'completed' AND campaign_id IS NOT NULL
-                GROUP BY campaign_id
-            ) d ON c.id = d.campaign_id
-            SET 
-                c.total_donations_received = COALESCE(d.total_received, 0),
-                c.donors_count = COALESCE(d.unique_donors, 0)
-        ");
+        // Backfill existing data - calculate totals from completed donations (MySQL/MariaDB only)
+        if (\DB::connection()->getDriverName() === 'mysql' || \DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("
+                UPDATE campaigns c
+                LEFT JOIN (
+                    SELECT 
+                        campaign_id,
+                        SUM(amount) as total_received,
+                        COUNT(DISTINCT donor_id) as unique_donors
+                    FROM donations
+                    WHERE status = 'completed' AND campaign_id IS NOT NULL
+                    GROUP BY campaign_id
+                ) d ON c.id = d.campaign_id
+                SET 
+                    c.total_donations_received = COALESCE(d.total_received, 0),
+                    c.donors_count = COALESCE(d.unique_donors, 0)
+            ");
+        }
     }
 
     /**

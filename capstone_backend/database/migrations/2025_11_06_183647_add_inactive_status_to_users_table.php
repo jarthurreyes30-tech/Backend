@@ -12,8 +12,10 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Modify the status enum to include 'inactive'
-        DB::statement("ALTER TABLE users MODIFY COLUMN status ENUM('active', 'suspended', 'inactive') DEFAULT 'active'");
+        // Modify the status enum to include 'inactive' (MySQL/MariaDB only)
+        if (DB::connection()->getDriverName() === 'mysql' || DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("ALTER TABLE users MODIFY COLUMN status ENUM('active', 'suspended', 'inactive') DEFAULT 'active'");
+        }
     }
 
     /**
@@ -21,10 +23,12 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Revert back to original enum values
-        // First, update any 'inactive' users to 'suspended'
-        DB::statement("UPDATE users SET status = 'suspended' WHERE status = 'inactive'");
-        // Then modify the enum
-        DB::statement("ALTER TABLE users MODIFY COLUMN status ENUM('active', 'suspended') DEFAULT 'active'");
+        // Revert back to original enum values (MySQL/MariaDB only)
+        if (DB::connection()->getDriverName() === 'mysql' || DB::connection()->getDriverName() === 'mariadb') {
+            // First, update any 'inactive' users to 'suspended'
+            DB::statement("UPDATE users SET status = 'suspended' WHERE status = 'inactive'");
+            // Then modify the enum
+            DB::statement("ALTER TABLE users MODIFY COLUMN status ENUM('active', 'suspended') DEFAULT 'active'");
+        }
     }
 };

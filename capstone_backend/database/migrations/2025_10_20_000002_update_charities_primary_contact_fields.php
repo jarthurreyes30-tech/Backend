@@ -36,15 +36,18 @@ return new class extends Migration
 
         // Migrate existing data from old fields to new fields (only if old columns exist)
         if (Schema::hasColumn('charities', 'contact_person_name')) {
-            DB::statement("
-                UPDATE charities 
-                SET 
-                    primary_first_name = SUBSTRING_INDEX(contact_person_name, ' ', 1),
-                    primary_last_name = SUBSTRING_INDEX(contact_person_name, ' ', -1),
-                    primary_email = contact_email,
-                    primary_phone = contact_phone
-                WHERE contact_person_name IS NOT NULL
-            ");
+            if (DB::connection()->getDriverName() === 'mysql' || DB::connection()->getDriverName() === 'mariadb') {
+                DB::statement("
+                    UPDATE charities 
+                    SET 
+                        primary_first_name = SUBSTRING_INDEX(contact_person_name, ' ', 1),
+                        primary_last_name = SUBSTRING_INDEX(contact_person_name, ' ', -1),
+                        primary_email = contact_email,
+                        primary_phone = contact_phone
+                    WHERE contact_person_name IS NOT NULL
+                ");
+            }
+            // For sqlite/testing we skip automatic split; new data will populate via app logic
         }
     }
 

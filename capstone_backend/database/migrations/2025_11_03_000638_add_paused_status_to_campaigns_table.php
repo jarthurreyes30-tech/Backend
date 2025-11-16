@@ -11,8 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Modify the status enum to include 'paused'
-        \DB::statement("ALTER TABLE campaigns MODIFY COLUMN status ENUM('draft', 'published', 'paused', 'closed', 'archived') DEFAULT 'draft'");
+        // Modify the status enum to include 'paused' (MySQL/MariaDB only)
+        $driver = \DB::connection()->getDriverName();
+        if (in_array($driver, ['mysql', 'mariadb'])) {
+            \DB::statement("ALTER TABLE campaigns MODIFY COLUMN status ENUM('draft', 'published', 'paused', 'closed', 'archived') DEFAULT 'draft'");
+        }
     }
 
     /**
@@ -20,7 +23,10 @@ return new class extends Migration
      */
     public function down(): void
     {
-        // Revert back to original enum values
-        \DB::statement("ALTER TABLE campaigns MODIFY COLUMN status ENUM('draft', 'published', 'closed', 'archived') DEFAULT 'draft'");
+        // Revert back to original enum values (MySQL/MariaDB only)
+        $driver = \DB::connection()->getDriverName();
+        if (in_array($driver, ['mysql', 'mariadb'])) {
+            \DB::statement("ALTER TABLE campaigns MODIFY COLUMN status ENUM('draft', 'published', 'closed', 'archived') DEFAULT 'draft'");
+        }
     }
 };

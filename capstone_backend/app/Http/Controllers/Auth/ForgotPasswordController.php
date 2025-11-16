@@ -157,6 +157,16 @@ class ForgotPasswordController extends Controller
         if (!Hash::check($code, $resetCode->token_hash)) {
             $resetCode->incrementAttempts();
             
+            // If this wrong attempt reached the max, lock and signal `max_attempts`
+            if ($resetCode->hasMaxAttempts()) {
+                $resetCode->markAsUsed();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Too many failed attempts. Please request a new code.',
+                    'max_attempts' => true,
+                ], 400);
+            }
+            
             $remainingAttempts = 5 - $resetCode->attempts;
             
             return response()->json([

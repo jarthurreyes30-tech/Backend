@@ -21,8 +21,10 @@ return new class extends Migration
             $table->index(['target_type', 'target_id']);
         });
         
-        // Update existing status enum to include new statuses
-        DB::statement("ALTER TABLE reports MODIFY COLUMN status ENUM('pending', 'under_review', 'resolved', 'dismissed', 'approved', 'rejected') DEFAULT 'pending'");
+        // Update existing status enum to include new statuses (MySQL/MariaDB only)
+        if (\DB::connection()->getDriverName() === 'mysql' || \DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("ALTER TABLE reports MODIFY COLUMN status ENUM('pending', 'under_review', 'resolved', 'dismissed', 'approved', 'rejected') DEFAULT 'pending'");
+        }
     }
 
     public function down(): void
@@ -32,7 +34,9 @@ return new class extends Migration
             $table->dropIndex(['target_type', 'target_id']);
         });
         
-        // Revert status enum
-        DB::statement("ALTER TABLE reports MODIFY COLUMN status ENUM('pending', 'under_review', 'resolved', 'dismissed') DEFAULT 'pending'");
+        // Revert status enum (MySQL/MariaDB only)
+        if (\DB::connection()->getDriverName() === 'mysql' || \DB::connection()->getDriverName() === 'mariadb') {
+            DB::statement("ALTER TABLE reports MODIFY COLUMN status ENUM('pending', 'under_review', 'resolved', 'dismissed') DEFAULT 'pending'");
+        }
     }
 };
