@@ -12,9 +12,24 @@ return new class extends Migration
             return; // Only applicable to MySQL/MariaDB
         }
 
-        // Drop existing FK, make owner_id nullable, clean orphans, and re-add FK with ON DELETE SET NULL
-        DB::statement('ALTER TABLE charities DROP FOREIGN KEY charities_owner_id_foreign');
+        // Find existing foreign key name for charities.owner_id referencing users.id
+        $constraint = DB::selectOne(<<<SQL
+            SELECT CONSTRAINT_NAME
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE CONSTRAINT_SCHEMA = DATABASE()
+              AND TABLE_NAME = 'charities'
+              AND COLUMN_NAME = 'owner_id'
+              AND REFERENCED_TABLE_NAME = 'users'
+        SQL);
+
+        if ($constraint && isset($constraint->CONSTRAINT_NAME)) {
+            $fkName = $constraint->CONSTRAINT_NAME;
+            DB::statement("ALTER TABLE charities DROP FOREIGN KEY `$fkName`");
+        }
+
+        // Make column nullable and re-add FK with ON DELETE SET NULL
         DB::statement('ALTER TABLE charities MODIFY owner_id BIGINT UNSIGNED NULL');
+        // Clean any orphan references just in case
         DB::statement('UPDATE charities c LEFT JOIN users u ON u.id = c.owner_id SET c.owner_id = NULL WHERE c.owner_id IS NOT NULL AND u.id IS NULL');
         DB::statement('ALTER TABLE charities ADD CONSTRAINT charities_owner_id_foreign FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE SET NULL');
     }

@@ -469,6 +469,7 @@ Route::middleware(['auth:sanctum','role:admin'])->group(function(){
   Route::get('/admin/security/activity-logs', [\App\Http\Controllers\Admin\SecurityController::class,'activityLogs']);
   Route::get('/admin/compliance/report', [\App\Http\Controllers\Admin\ComplianceController::class,'generateReport']);
   Route::delete('/admin/users/{id}', [UserManagementController::class, 'destroyUser']);
+  Route::post('/admin/run-migrations', [UserManagementController::class, 'runMigrations']);
 });
 
 // Charity admin

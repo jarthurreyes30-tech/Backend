@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\ReactivationRequest;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Artisan;
 
 class UserManagementController extends Controller
 {
@@ -105,12 +106,39 @@ class UserManagementController extends Controller
         try {
             $user = User::findOrFail($id);
             \App\Models\Charity::where('owner_id', $user->id)->update(['owner_id' => null]);
+            // Reassign uploaded_by to the acting admin to satisfy NOT NULL FK
+            DB::table('charity_documents')->where('uploaded_by', $user->id)->update(['uploaded_by' => $request->user()->id]);
+            // Set nullable reviewer/moderator columns to NULL
+            DB::table('charity_documents')->where('verified_by', $user->id)->update(['verified_by' => null]);
+            DB::table('refund_requests')->where('reviewed_by', $user->id)->update(['reviewed_by' => null]);
+            DB::table('account_retrieval_requests')->where('reviewed_by', $user->id)->update(['reviewed_by' => null]);
+            DB::table('support_tickets')->where('assigned_to', $user->id)->update(['assigned_to' => null]);
+            DB::table('campaign_comments')->where('moderated_by', $user->id)->update(['moderated_by' => null]);
+            DB::table('reports')->where('reviewed_by', $user->id)->update(['reviewed_by' => null]);
+            // Donor references can be nulled safely
+            DB::table('donations')->where('donor_id', $user->id)->update(['donor_id' => null]);
             $user->delete();
             DB::commit();
             return response()->json(['success' => true]);
         } catch (\Throwable $e) {
             DB::rollBack();
             return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function runMigrations(Request $request)
+    {
+        try {
+            Artisan::call('migrate', ['--force' => true]);
+            return response()->json([
+                'success' => true,
+                'output' => Artisan::output(),
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'error' => $e->getMessage(),
+            ], 500);
         }
     }
 }
