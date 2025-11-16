@@ -23,6 +23,7 @@ php artisan db:seed --class=AdminSeeder --force || true
 php artisan config:cache || true
 php artisan route:cache || true
 php artisan view:cache || true
+php artisan storage:link || true
 
 # Run HTTP server
 php artisan serve --host=0.0.0.0 --port="${PORT}"

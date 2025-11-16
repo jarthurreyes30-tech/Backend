@@ -344,8 +344,8 @@ class AuthController extends Controller
             return response()->json(['message'=>'Invalid credentials'], 401);
         }
 
-        // CRITICAL: Block login if email not verified
-        if (!$user->email_verified_at) {
+        // CRITICAL: Block login if email not verified (donor accounts only)
+        if ($user->role === 'donor' && !$user->email_verified_at) {
             Log::warning('Login blocked - email not verified', [
                 'email' => $user->email,
                 'user_id' => $user->id
