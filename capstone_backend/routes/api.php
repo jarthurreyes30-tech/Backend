@@ -7,7 +7,7 @@ use App\Http\Controllers\{
 use App\Models\Charity;
 use App\Models\Campaign;
 use App\Models\CampaignUpdate;
-use App\Http\Controllers\Admin\{VerificationController, AdminActionLogController, FundTrackingController, UserActivityLogController, AdminDashboardController};
+use App\Http\Controllers\Admin\{VerificationController, AdminActionLogController, FundTrackingController, UserActivityLogController, AdminDashboardController, UserManagementController};
 
 // Health
 Route::get('/ping', fn () => ['ok' => true, 'time' => now()->toDateTimeString()]);
@@ -468,6 +468,7 @@ Route::middleware(['auth:sanctum','role:admin'])->group(function(){
   Route::post('/admin/process-recurring-donations', [DonationController::class,'processRecurringDonations']);
   Route::get('/admin/security/activity-logs', [\App\Http\Controllers\Admin\SecurityController::class,'activityLogs']);
   Route::get('/admin/compliance/report', [\App\Http\Controllers\Admin\ComplianceController::class,'generateReport']);
+  Route::delete('/admin/users/{id}', [UserManagementController::class, 'destroyUser']);
 });
 
 // Charity admin

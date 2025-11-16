@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Models\User;
 use App\Models\ReactivationRequest;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
 
 class UserManagementController extends Controller
 {
@@ -96,5 +97,20 @@ class UserManagementController extends Controller
             'success' => true,
             'message' => 'Reactivation request rejected'
         ]);
+    }
+
+    public function destroyUser(Request $request, $id)
+    {
+        DB::beginTransaction();
+        try {
+            $user = User::findOrFail($id);
+            \App\Models\Charity::where('owner_id', $user->id)->update(['owner_id' => null]);
+            $user->delete();
+            DB::commit();
+            return response()->json(['success' => true]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 500);
+        }
     }
 }
