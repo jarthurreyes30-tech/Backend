@@ -1323,6 +1323,10 @@ class AuthController extends Controller
     private function verifyDonorFromSession($sessionData, $code)
     {
         try {
+            // Normalize provided code and session code to avoid whitespace/type issues
+            $providedCode = preg_replace('/\D/', '', (string) trim($code));
+            $sessionCode = preg_replace('/\D/', '', (string) ($sessionData['verification_code'] ?? ''));
+
             // Check if expired
             $expiresAt = \Carbon\Carbon::parse($sessionData['expires_at']);
             if (now()->gt($expiresAt)) {
@@ -1343,7 +1347,7 @@ class AuthController extends Controller
             }
 
             // Check code
-            if ($sessionData['verification_code'] !== $code) {
+            if ($sessionCode !== $providedCode) {
                 // Increment attempts
                 $sessionData['attempts']++;
                 session(['pending_donor_registration' => $sessionData]);
@@ -1618,10 +1622,18 @@ class AuthController extends Controller
             'code' => 'required|string|size:6',
         ]);
 
-        // First check for pending registration (new flow)
-        $pendingReg = PendingRegistration::where('email', $validated['email'])
-            ->where('verification_code', $validated['code'])
-            ->first();
+        // Normalize inputs
+        $email = strtolower(trim($validated['email']));
+        $code = preg_replace('/\D/', '', trim($validated['code']));
+
+        // Check SESSION for donor registration first (session-based flow)
+        $sessionData = session('pending_donor_registration');
+        if ($sessionData && strcasecmp($sessionData['email'] ?? '', $email) === 0) {
+            return $this->verifyDonorFromSession($sessionData, $code);
+        }
+
+        // Check DATABASE for pending registration (charity flow or legacy donor pending)
+        $pendingReg = PendingRegistration::where('email', $email)->first();
 
         if ($pendingReg) {
             // Check if expired
@@ -1640,6 +1652,16 @@ class AuthController extends Controller
                     'message' => 'Maximum verification attempts reached. Please register again.',
                     'max_attempts' => true
                 ], 429);
+            }
+
+            // Validate code strictly (avoid type/coercion issues)
+            if ((string) $pendingReg->verification_code !== (string) $code) {
+                $pendingReg->incrementAttempts();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Invalid verification code',
+                    'remaining_attempts' => 5 - $pendingReg->attempts
+                ], 400);
             }
 
             // Create the actual user account now
@@ -1694,7 +1716,7 @@ class AuthController extends Controller
             } catch (\Exception $e) {
                 Log::error('Failed to create user from pending registration', [
                     'error' => $e->getMessage(),
-                    'email' => $validated['email'],
+                    'email' => $email,
                 ]);
                 return response()->json([
                     'success' => false,
@@ -1704,8 +1726,8 @@ class AuthController extends Controller
         }
 
         // Fallback: Check old email verification system (for existing users)
-        $verification = \App\Models\EmailVerification::where('email', $validated['email'])
-            ->where('code', $validated['code'])
+        $verification = \App\Models\EmailVerification::where('email', $email)
+            ->where('code', $code)
             ->first();
 
         if (!$verification) {
@@ -1844,8 +1866,71 @@ class AuthController extends Controller
             'email' => 'required|email',
         ]);
 
-        // First check for pending registration (new flow)
-        $pendingReg = PendingRegistration::where('email', $validated['email'])->first();
+        // Normalize email
+        $email = strtolower(trim($validated['email']));
+
+        // First check SESSION for donor (session-based flow)
+        $sessionData = session('pending_donor_registration');
+        if ($sessionData && strcasecmp($sessionData['email'] ?? '', $email) === 0) {
+            // Use the same logic as resendDonorCode()
+            if (($sessionData['resend_count'] ?? 0) >= 3) {
+                session()->forget('pending_donor_registration');
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Maximum resend limit reached. Please register again.',
+                    'max_resends' => true
+                ], 429);
+            }
+
+            $code = str_pad(random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+            $expiresAt = now()->addMinutes(10);
+
+            $sessionData['verification_code'] = $code;
+            $sessionData['expires_at'] = $expiresAt->toIso8601String();
+            $sessionData['attempts'] = 0;
+            $sessionData['resend_count'] = ($sessionData['resend_count'] ?? 0) + 1;
+            session(['pending_donor_registration' => $sessionData]);
+
+            try {
+                $brevoMailer = app(\App\Services\BrevoMailer::class);
+                $brevoMailer->send(
+                    $sessionData['email'],
+                    $sessionData['name'],
+                    'Verify Your Email - GiveOra',
+                    view('emails.verification-code', [
+                        'name' => $sessionData['name'],
+                        'code' => $code,
+                        'expiresAt' => $expiresAt,
+                        'email' => $sessionData['email']
+                    ])->render(),
+                    view('emails.verification-code-plain', [
+                        'name' => $sessionData['name'],
+                        'code' => $code,
+                        'expiresAt' => $expiresAt,
+                        'email' => $sessionData['email']
+                    ])->render()
+                );
+                Log::info('✅ Donor verification code resent from SESSION', [
+                    'email' => $sessionData['email']
+                ]);
+            } catch (\Exception $e) {
+                Log::error('Donor resend (session) email failed', [
+                    'error' => $e->getMessage(),
+                ]);
+                // Continue; frontend will still show updated resend counters
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'A new verification code has been sent to your email.',
+                'resend_count' => $sessionData['resend_count'],
+                'remaining_resends' => 3 - $sessionData['resend_count'],
+                'expires_in' => 10,
+            ]);
+        }
+
+        // Then check for pending registration in DATABASE (charity/legacy)
+        $pendingReg = PendingRegistration::where('email', $email)->first();
 
         if ($pendingReg) {
             // Check resend limit
